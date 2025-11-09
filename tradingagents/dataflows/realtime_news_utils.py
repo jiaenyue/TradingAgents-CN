@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """
-实时新闻数据获取工具
-解决新闻滞后性问题
+实时新闻数据获取与聚合工具。
+
+该模块提供了一个 `RealtimeNewsAggregator` 类, 用于从多个来源
+(如 Finnhub, Alpha Vantage, NewsAPI, 以及中文财经网站)
+获取、整合、去重和格式化与特定股票相关的实时新闻。
+
+主要功能:
+- **多源聚合**: 从多个国际和国内新闻API及RSS源获取数据。
+- **优先级策略**: 优先使用专业的金融API, 保证数据质量和时效性。
+- **智能去重**: 基于新闻标题对聚合来的新闻进行去重处理。
+- **紧急度评估**: 通过关键词分析, 自动评估新闻的紧急程度 (高、中、低)。
+- **相关性计算**: 计算新闻标题与股票代码的相关性分数。
+- **统一格式**: 将不同来源的新闻数据统一封装到 `NewsItem` 对象中。
+- **报告生成**: 将最终的新闻列表格式化为一份结构清晰、人类可读的分析报告。
 """
 
 import requests
@@ -20,7 +32,20 @@ logger = get_logger('agents')
 
 @dataclass
 class NewsItem:
-    """新闻项目数据结构"""
+    """
+    新闻条目的数据类表示。
+
+    用于标准化来自不同新闻源的数据格式, 方便后续处理和分析。
+
+    Attributes:
+        title (str): 新闻标题。
+        content (str): 新闻正文或摘要。
+        source (str): 新闻来源 (例如, 'FinnHub', '东方财富')。
+        publish_time (datetime): 新闻发布时间。
+        url (str): 新闻原文的链接。
+        urgency (str): 评估出的新闻紧急程度 ('high', 'medium', 'low')。
+        relevance_score (float): 新闻与查询股票的相关性评分 (0.0到1.0)。
+    """
     title: str
     content: str
     source: str
@@ -31,9 +56,15 @@ class NewsItem:
 
 
 class RealtimeNewsAggregator:
-    """实时新闻聚合器"""
+    """
+    实时新闻聚合器。
+
+    该类负责从多个配置好的API源获取新闻, 对其进行处理 (去重、排序、评估),
+    并最终生成一份综合性的新闻报告。
+    """
     
     def __init__(self):
+        """初始化实时新闻聚合器, 设置请求头并从环境变量加载API密钥。"""
         self.headers = {
             'User-Agent': 'TradingAgents-CN/1.0'
         }
@@ -45,13 +76,23 @@ class RealtimeNewsAggregator:
         
     def get_realtime_stock_news(self, ticker: str, hours_back: int = 6, max_news: int = 10) -> List[NewsItem]:
         """
-        获取实时股票新闻
-        优先级：专业API > 新闻API > 搜索引擎
-        
+        聚合获取指定股票的实时新闻。
+
+        该方法按以下优先级顺序从多个数据源获取新闻:
+        1. Finnhub
+        2. Alpha Vantage
+        3. NewsAPI (如果配置了密钥)
+        4. 中文财经新闻源 (如东方财富、财联社)
+
+        获取到的新闻会经过统一格式化、去重, 并按发布时间降序排序。
+
         Args:
-            ticker: 股票代码
-            hours_back: 回溯小时数
-            max_news: 最大新闻数量，默认10条
+            ticker (str): 股票代码。
+            hours_back (int): 从当前时间回溯的小时数, 用于过滤新闻。
+            max_news (int): 返回的最大新闻条数。
+
+        Returns:
+            List[NewsItem]: 一个包含新闻对象的列表, 按时间倒序排列。
         """
         logger.info(f"[新闻聚合器] 开始获取 {ticker} 的实时新闻，回溯时间: {hours_back}小时")
         start_time = datetime.now()
@@ -141,7 +182,16 @@ class RealtimeNewsAggregator:
         return sorted_news
     
     def _get_finnhub_realtime_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
-        """获取FinnHub实时新闻"""
+        """
+        从 Finnhub API 获取公司新闻。
+
+        Args:
+            ticker (str): 股票代码。
+            hours_back (int): 回溯的小时数。
+
+        Returns:
+            List[NewsItem]: 从 Finnhub 获取的新闻列表。
+        """
         if not self.finnhub_key:
             return []
         
@@ -191,7 +241,16 @@ class RealtimeNewsAggregator:
             return []
     
     def _get_alpha_vantage_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
-        """获取Alpha Vantage新闻"""
+        """
+        从 Alpha Vantage API 获取新闻及情绪数据。
+
+        Args:
+            ticker (str): 股票代码。
+            hours_back (int): 回溯的小时数。
+
+        Returns:
+            List[NewsItem]: 从 Alpha Vantage 获取的新闻列表。
+        """
         if not self.alpha_vantage_key:
             return []
         
@@ -242,7 +301,16 @@ class RealtimeNewsAggregator:
             return []
     
     def _get_newsapi_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
-        """获取NewsAPI新闻"""
+        """
+        从 NewsAPI 获取新闻。
+
+        Args:
+            ticker (str): 股票代码。
+            hours_back (int): 回溯的小时数。
+
+        Returns:
+            List[NewsItem]: 从 NewsAPI 获取的新闻列表。
+        """
         try:
             # 构建搜索查询
             company_names = {
@@ -297,7 +365,16 @@ class RealtimeNewsAggregator:
             return []
     
     def _get_chinese_finance_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
-        """获取中文财经新闻"""
+        """
+        从多个中文财经新闻源 (如东方财富, 财联社) 获取新闻。
+
+        Args:
+            ticker (str): 股票代码。
+            hours_back (int): 回溯的小时数。
+
+        Returns:
+            List[NewsItem]: 从中文新闻源获取的新闻列表。
+        """
         # 集成中文财经新闻API：财联社、东方财富等
         logger.info(f"[中文财经新闻] 开始获取 {ticker} 的中文财经新闻，回溯时间: {hours_back}小时")
         start_time = datetime.now()
@@ -426,7 +503,17 @@ class RealtimeNewsAggregator:
             return []
     
     def _parse_rss_feed(self, rss_url: str, ticker: str, hours_back: int) -> List[NewsItem]:
-        """解析RSS源"""
+        """
+        解析给定的RSS源, 筛选与股票相关且在时间范围内的新闻。
+
+        Args:
+            rss_url (str): 要解析的RSS源的URL。
+            ticker (str): 用于相关性筛选的股票代码。
+            hours_back (int): 用于时效性筛选的回溯小时数。
+
+        Returns:
+            List[NewsItem]: 从该RSS源解析并筛选出的新闻列表。
+        """
         logger.info(f"[RSS解析] 开始解析RSS源: {rss_url}，股票: {ticker}，回溯时间: {hours_back}小时")
         start_time = datetime.now()
         
@@ -497,7 +584,16 @@ class RealtimeNewsAggregator:
             return []
     
     def _assess_news_urgency(self, title: str, content: str) -> str:
-        """评估新闻紧急程度"""
+        """
+        根据新闻标题和内容中的关键词评估其紧急程度。
+
+        Args:
+            title (str): 新闻标题。
+            content (str): 新闻内容。
+
+        Returns:
+            str: 紧急程度评级 ('high', 'medium', 'low')。
+        """
         text = (title + ' ' + content).lower()
         
         # 高紧急度关键词
@@ -528,7 +624,16 @@ class RealtimeNewsAggregator:
         return 'low'
     
     def _calculate_relevance(self, title: str, ticker: str) -> float:
-        """计算新闻相关性分数"""
+        """
+        根据标题内容计算新闻与特定股票的相关性分数。
+
+        Args:
+            title (str): 新闻标题。
+            ticker (str): 股票代码。
+
+        Returns:
+            float: 相关性分数 (0.0 到 1.0)。
+        """
         text = title.lower()
         ticker_lower = ticker.lower()
         
@@ -563,7 +668,15 @@ class RealtimeNewsAggregator:
         return 0.3  # 默认相关性
     
     def _deduplicate_news(self, news_items: List[NewsItem]) -> List[NewsItem]:
-        """去重新闻"""
+        """
+        基于新闻标题对新闻列表进行去重。
+
+        Args:
+            news_items (List[NewsItem]): 待去重的新闻列表。
+
+        Returns:
+            List[NewsItem]: 去重后的新闻列表。
+        """
         logger.info(f"[新闻去重] 开始对 {len(news_items)} 条新闻进行去重处理")
         start_time = datetime.now()
         
@@ -600,7 +713,18 @@ class RealtimeNewsAggregator:
         return unique_news
     
     def format_news_report(self, news_items: List[NewsItem], ticker: str) -> str:
-        """格式化新闻报告"""
+        """
+        将新闻列表格式化为一份结构化的、人类可读的报告。
+
+        报告会按紧急程度对新闻进行分组, 并包含时效性分析。
+
+        Args:
+            news_items (List[NewsItem]): 经过处理的新闻列表。
+            ticker (str): 相关股票的代码。
+
+        Returns:
+            str: 格式化后的新闻报告字符串。
+        """
         logger.info(f"[新闻报告] 开始为 {ticker} 生成新闻报告")
         start_time = datetime.now()
         
@@ -676,7 +800,23 @@ class RealtimeNewsAggregator:
 
 def get_realtime_stock_news(ticker: str, curr_date: str, hours_back: int = 6) -> str:
     """
-    获取实时股票新闻的主要接口函数
+    获取指定股票实时新闻的主接口函数。
+
+    该函数是外部调用实时新闻功能的入口点。它首先会判断股票的市场类型
+    (A股, 港股, 美股), 然后采用不同的策略获取新闻:
+    - 对于A股, 优先尝试使用专门的东方财富新闻源。
+    - 对于其他市场或当A股新闻获取失败时, 使用 `RealtimeNewsAggregator`
+      进行多源聚合。
+    - 如果所有主要新闻源都失败, 会尝试使用 Google News 作为备用方案。
+    - 如果所有方法均失败, 返回一条包含错误信息的提示。
+
+    Args:
+        ticker (str): 股票代码。
+        curr_date (str): 当前日期 (YYYY-MM-DD), 主要用于日志和某些备用API。
+        hours_back (int): 从当前时间回溯的小时数, 用于筛选新闻。
+
+    Returns:
+        str: 格式化后的新闻报告字符串, 或者在完全失败时返回错误信息。
     """
     logger.info(f"[新闻分析] ========== 函数入口 ==========")
     logger.info(f"[新闻分析] 函数: get_realtime_stock_news")

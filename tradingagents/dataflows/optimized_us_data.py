@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 """
-优化的美股数据获取工具
-集成缓存策略，减少API调用，提高响应速度
+优化的美股及港股数据获取工具。
+
+该模块提供了一个 `OptimizedUSDataProvider` 类, 旨在为美股和港股市场
+数据的获取提供一个高效、稳定且带有缓存功能的接口。它整合了多个
+数据源 (如 Finnhub, Yahoo Finance, AKShare), 并实现了多级缓存和
+故障备援策略。
+
+主要特性:
+- **多数据源支持**: 优先使用 Finnhub API, 失败后能根据股票市场
+  (美股、港股) 自动切换到 Yahoo Finance 或 AKShare 等备用数据源。
+- **缓存优先**: 在请求数据时, 首先检查有效的本地缓存, 减少冗余的
+  API 调用。
+- **速率限制**: 内置 API 调用速率控制器, 避免因请求频繁而被封禁。
+- **故障备援**: 在所有 API 调用都失败时, 能够生成一份备用的模拟数据,
+  保证程序的健壮性。
+- **数据格式化**: 将从不同源获取的原始数据统一格式化为包含关键指标
+  (如 MA, RSI) 的、人类可读的分析报告。
 """
 
 import os
@@ -20,9 +35,14 @@ logger = get_logger('agents')
 
 
 class OptimizedUSDataProvider:
-    """优化的美股数据提供器 - 集成缓存和API限制处理"""
+    """优化的美股数据提供器。
+
+    该类封装了美股及港股数据获取的复杂逻辑, 包括多源API的智能切换、
+    缓存管理、API调用速率控制以及数据获取失败时的备援策略。
+    """
     
     def __init__(self):
+        """初始化优化的美股数据提供器。"""
         self.cache = get_cache()
         self.config = get_config()
         self.last_api_call = 0
@@ -31,7 +51,7 @@ class OptimizedUSDataProvider:
         logger.info(f"📊 优化美股数据提供器初始化完成")
     
     def _wait_for_rate_limit(self):
-        """等待API限制"""
+        """确保API调用之间有最小的时间间隔, 以避免触发速率限制。"""
         current_time = time.time()
         time_since_last_call = current_time - self.last_api_call
         
@@ -42,19 +62,28 @@ class OptimizedUSDataProvider:
         
         self.last_api_call = time.time()
     
-    def get_stock_data(self, symbol: str, start_date: str, end_date: str, 
+    def get_stock_data(self, symbol: str, start_date: str, end_date: str,
                       force_refresh: bool = False) -> str:
         """
-        获取美股数据 - 优先使用缓存
-        
+        获取美股或港股的行情数据, 优先使用缓存。
+
+        该方法实现了多数据源的故障备援逻辑:
+        1. 检查 Finnhub 和 Yahoo Finance 的有效缓存。
+        2. 如果无缓存或强制刷新, 尝试从 Finnhub API 获取实时数据。
+        3. 如果 Finnhub 失败, 则根据股票代码判断市场:
+           - **港股**: 尝试 AKShare, 失败后备援至 Yahoo Finance。
+           - **美股**: 尝试 Yahoo Finance。
+        4. 如果所有API调用均失败, 生成一份备用模拟数据。
+        5. 成功获取的数据会被存入缓存。
+
         Args:
-            symbol: 股票代码
-            start_date: 开始日期 (YYYY-MM-DD)
-            end_date: 结束日期 (YYYY-MM-DD)
-            force_refresh: 是否强制刷新缓存
-        
+            symbol (str): 股票代码 (美股或港股)。
+            start_date (str): 开始日期, 格式为 'YYYY-MM-DD'。
+            end_date (str): 结束日期, 格式为 'YYYY-MM-DD'。
+            force_refresh (bool, optional): 是否强制刷新缓存。默认为 False。
+
         Returns:
-            格式化的股票数据字符串
+            str: 包含格式化股票数据的分析报告字符串。
         """
         logger.info(f"📈 获取美股数据: {symbol} ({start_date} 到 {end_date})")
         
@@ -179,9 +208,22 @@ class OptimizedUSDataProvider:
 
         return formatted_data
     
-    def _format_stock_data(self, symbol: str, data: pd.DataFrame, 
+    def _format_stock_data(self, symbol: str, data: pd.DataFrame,
                           start_date: str, end_date: str) -> str:
-        """格式化股票数据为字符串"""
+        """将从 Yahoo Finance 获取的 DataFrame 格式化为分析报告字符串。
+
+        报告中包含基本信息、价格统计、技术指标 (MA, RSI) 和最近的
+        行情数据。
+
+        Args:
+            symbol (str): 股票代码。
+            data (pd.DataFrame): 包含历史行情数据的 DataFrame。
+            start_date (str): 开始日期。
+            end_date (str): 结束日期。
+
+        Returns:
+            str: 格式化的分析报告。
+        """
         
         # 移除时区信息
         if data.index.tz is not None:
@@ -241,7 +283,16 @@ class OptimizedUSDataProvider:
         return result
     
     def _try_get_old_cache(self, symbol: str, start_date: str, end_date: str) -> Optional[str]:
-        """尝试获取过期的缓存数据作为备用"""
+        """当实时数据获取失败时, 尝试从缓存中查找任何可用的 (即使已过期) 数据。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str): 数据的开始日期。
+            end_date (str): 数据的结束日期。
+
+        Returns:
+            Optional[str]: 如果找到旧缓存, 返回其内容并附带警告; 否则返回 None。
+        """
         try:
             # 查找任何相关的缓存，不考虑TTL
             for metadata_file in self.cache.metadata_dir.glob(f"*_meta.json"):
@@ -265,8 +316,17 @@ class OptimizedUSDataProvider:
         
         return None
 
-    def _get_data_from_finnhub(self, symbol: str, start_date: str, end_date: str) -> str:
-        """从FINNHUB API获取股票数据"""
+    def _get_data_from_finnhub(self, symbol: str, start_date: str, end_date: str) -> Optional[str]:
+        """通过 Finnhub API 获取实时行情数据并格式化为报告。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str): 开始日期 (用于报告)。
+            end_date (str): 结束日期 (用于报告)。
+
+        Returns:
+            Optional[str]: 如果成功, 返回格式化的数据报告; 否则返回 None。
+        """
         try:
             import finnhub
             import os
@@ -323,7 +383,17 @@ class OptimizedUSDataProvider:
             return None
 
     def _generate_fallback_data(self, symbol: str, start_date: str, end_date: str, error_msg: str) -> str:
-        """生成备用数据"""
+        """在所有数据获取尝试均失败后, 生成一份包含错误信息的模拟数据报告。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str): 开始日期。
+            end_date (str): 结束日期。
+            error_msg (str): 具体的错误信息。
+
+        Returns:
+            str: 格式化的备用数据报告。
+        """
         return f"""# {symbol} 美股数据获取失败
 
 ## ❌ 错误信息
@@ -347,26 +417,30 @@ class OptimizedUSDataProvider:
 _us_data_provider = None
 
 def get_optimized_us_data_provider() -> OptimizedUSDataProvider:
-    """获取全局美股数据提供器实例"""
+    """获取 `OptimizedUSDataProvider` 的全局单例。
+
+    Returns:
+        OptimizedUSDataProvider: 全局美股数据提供器实例。
+    """
     global _us_data_provider
     if _us_data_provider is None:
         _us_data_provider = OptimizedUSDataProvider()
     return _us_data_provider
 
 
-def get_us_stock_data_cached(symbol: str, start_date: str, end_date: str, 
+def get_us_stock_data_cached(symbol: str, start_date: str, end_date: str,
                            force_refresh: bool = False) -> str:
     """
-    获取美股数据的便捷函数
-    
+    获取美股或港股行情数据的便捷函数。
+
     Args:
-        symbol: 股票代码
-        start_date: 开始日期 (YYYY-MM-DD)
-        end_date: 结束日期 (YYYY-MM-DD)
-        force_refresh: 是否强制刷新缓存
-    
+        symbol (str): 股票代码。
+        start_date (str): 开始日期 (格式 'YYYY-MM-DD')。
+        end_date (str): 结束日期 (格式 'YYYY-MM-DD')。
+        force_refresh (bool, optional): 是否强制刷新缓存。
+
     Returns:
-        格式化的股票数据字符串
+        str: 格式化的股票数据分析报告。
     """
     provider = get_optimized_us_data_provider()
     return provider.get_stock_data(symbol, start_date, end_date, force_refresh)

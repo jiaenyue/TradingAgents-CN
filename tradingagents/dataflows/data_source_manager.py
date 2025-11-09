@@ -22,20 +22,42 @@ logger = setup_dataflow_logging()
 
 
 class ChinaDataSource(Enum):
-    """中国股票数据源枚举"""
+    """定义了支持的中国股票数据源的枚举类型。
+
+    Attributes:
+        TUSHARE (str): 代表 Tushare 数据源。
+        AKSHARE (str): 代表 AKShare 数据源。
+        BAOSTOCK (str): 代表 BaoStock 数据源。
+    """
     TUSHARE = "tushare"
     AKSHARE = "akshare"
     BAOSTOCK = "baostock"
 
 
-
-
-
 class DataSourceManager:
-    """数据源管理器"""
+    """数据源管理器。
+
+    此类作为访问不同中国股票数据源（如Tushare, AKShare, BaoStock）的
+    统一入口点和策略中心。它负责：
+    - 在初始化时检测环境中可用的数据源。
+    - 根据环境变量或手动设置来管理默认和当前使用的数据源。
+    - 提供一个统一的接口 `get_stock_data`，该接口能根据当前设置的
+      数据源自动调用相应的适配器来获取数据。
+    - 实现一个健壮的降级（fallback）机制：当主数据源获取失败时，能
+      自动按预设顺序尝试其他可用的数据源。
+    - 提供专门针对特定数据源（如Tushare）的便捷功能接口。
+
+    Attributes:
+        default_source (ChinaDataSource): 默认的数据源。
+        available_sources (List[ChinaDataSource]): 环境中所有可用的数据源列表。
+        current_source (ChinaDataSource): 当前正在使用的数据源。
+    """
 
     def __init__(self):
-        """初始化数据源管理器"""
+        """初始化数据源管理器。
+
+        该过程包括确定默认数据源、检查所有可用数据源以及设置当前数据源。
+        """
         self.default_source = self._get_default_source()
         self.available_sources = self._check_available_sources()
         self.current_source = self.default_source
@@ -45,7 +67,13 @@ class DataSourceManager:
         logger.info(f"   可用数据源: {[s.value for s in self.available_sources]}")
 
     def _get_default_source(self) -> ChinaDataSource:
-        """获取默认数据源"""
+        """从环境变量 `DEFAULT_CHINA_DATA_SOURCE` 读取并确定默认数据源。
+
+        如果环境变量未设置，则默认为 AKShare。
+
+        Returns:
+            ChinaDataSource: 默认数据源的枚举成员。
+        """
         # 从环境变量获取，默认使用AKShare作为第一优先级数据源
         env_source = os.getenv('DEFAULT_CHINA_DATA_SOURCE', 'akshare').lower()
 
@@ -61,16 +89,18 @@ class DataSourceManager:
     # ==================== Tushare数据接口 ====================
 
     def get_china_stock_data_tushare(self, symbol: str, start_date: str, end_date: str) -> str:
-        """
-        使用Tushare获取中国A股历史数据
+        """强制使用Tushare数据源获取中国A股的历史行情数据。
+
+        此方法会临时将当前数据源切换到Tushare，执行数据获取，然后在操作
+        完成后恢复原始的数据源设置。
 
         Args:
-            symbol: 股票代码
-            start_date: 开始日期
-            end_date: 结束日期
+            symbol (str): 股票代码。
+            start_date (str): 开始日期 (格式: YYYY-MM-DD)。
+            end_date (str): 结束日期 (格式: YYYY-MM-DD)。
 
         Returns:
-            str: 格式化的股票数据报告
+            str: 格式化后的股票数据报告文本。
         """
         # 临时切换到Tushare数据源
         original_source = self.current_source
@@ -84,14 +114,13 @@ class DataSourceManager:
             self.current_source = original_source
 
     def search_china_stocks_tushare(self, keyword: str) -> str:
-        """
-        使用Tushare搜索中国股票
+        """强制使用Tushare数据源按关键词搜索中国股票。
 
         Args:
-            keyword: 搜索关键词
+            keyword (str): 搜索关键词（可以是股票代码、名称或拼音）。
 
         Returns:
-            str: 搜索结果
+            str: 格式化的搜索结果列表，或在失败时返回错误信息。
         """
         try:
             from .tushare_adapter import get_tushare_adapter
@@ -123,14 +152,13 @@ class DataSourceManager:
             return f"❌ 搜索股票失败: {e}"
 
     def get_china_stock_fundamentals_tushare(self, symbol: str) -> str:
-        """
-        使用Tushare获取中国股票基本面数据
+        """强制使用Tushare数据源获取中国股票的基本面数据。
 
         Args:
-            symbol: 股票代码
+            symbol (str): 股票代码。
 
         Returns:
-            str: 基本面分析报告
+            str: 格式化后的基本面分析报告。
         """
         try:
             from .tushare_adapter import get_tushare_adapter
@@ -150,14 +178,13 @@ class DataSourceManager:
             return f"❌ 获取{symbol}基本面数据失败: {e}"
 
     def get_china_stock_info_tushare(self, symbol: str) -> str:
-        """
-        使用Tushare获取中国股票基本信息
+        """强制使用Tushare数据源获取中国股票的基本信息。
 
         Args:
-            symbol: 股票代码
+            symbol (str): 股票代码。
 
         Returns:
-            str: 股票基本信息
+            str: 格式化后的股票基本信息文本。
         """
         try:
             from .tushare_adapter import get_tushare_adapter
@@ -187,7 +214,13 @@ class DataSourceManager:
             return f"❌ 获取{symbol}股票信息失败: {e}"
     
     def _check_available_sources(self) -> List[ChinaDataSource]:
-        """检查可用的数据源"""
+        """检查并返回当前Python环境中所有已安装且配置正确的可用数据源。
+
+        它会逐一尝试导入所需的库并检查必要的配置（如API Token）。
+
+        Returns:
+            List[ChinaDataSource]: 可用数据源的枚举成员列表。
+        """
         available = []
         
         # 检查Tushare
@@ -221,11 +254,22 @@ class DataSourceManager:
         return available
     
     def get_current_source(self) -> ChinaDataSource:
-        """获取当前数据源"""
+        """获取当前正在使用的数据源。
+
+        Returns:
+            ChinaDataSource: 当前数据源的枚举成员。
+        """
         return self.current_source
     
     def set_current_source(self, source: ChinaDataSource) -> bool:
-        """设置当前数据源"""
+        """设置当前要使用的数据源。
+
+        Args:
+            source (ChinaDataSource): 要设置的数据源。
+
+        Returns:
+            bool: 如果设置成功（数据源可用），返回 True；否则返回 False。
+        """
         if source in self.available_sources:
             self.current_source = source
             logger.info(f"✅ 数据源已切换到: {source.value}")
@@ -235,7 +279,14 @@ class DataSourceManager:
             return False
     
     def get_data_adapter(self):
-        """获取当前数据源的适配器"""
+        """根据当前设置的数据源，动态获取并返回对应的适配器实例。
+
+        Raises:
+            ValueError: 如果当前设置了不支持的数据源。
+
+        Returns:
+            一个实现了数据获取接口的适配器实例 (例如, TushareAdapter)。
+        """
         if self.current_source == ChinaDataSource.TUSHARE:
             return self._get_tushare_adapter()
         elif self.current_source == ChinaDataSource.AKSHARE:
@@ -246,7 +297,7 @@ class DataSourceManager:
             raise ValueError(f"不支持的数据源: {self.current_source}")
     
     def _get_tushare_adapter(self):
-        """获取Tushare适配器"""
+        """动态导入并返回Tushare适配器的实例。"""
         try:
             from .tushare_adapter import get_tushare_adapter
             return get_tushare_adapter()
@@ -255,7 +306,7 @@ class DataSourceManager:
             return None
     
     def _get_akshare_adapter(self):
-        """获取AKShare适配器"""
+        """动态导入并返回AKShare适配器的实例。"""
         try:
             from .akshare_utils import get_akshare_provider
             return get_akshare_provider()
@@ -264,7 +315,7 @@ class DataSourceManager:
             return None
     
     def _get_baostock_adapter(self):
-        """获取BaoStock适配器"""
+        """动态导入并返回BaoStock适配器的实例。"""
         try:
             from .baostock_utils import get_baostock_provider
             return get_baostock_provider()
@@ -273,16 +324,20 @@ class DataSourceManager:
             return None
     
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> str:
-        """
-        获取股票数据的统一接口
+        """获取股票历史行情数据的统一接口。
+
+        此方法是数据获取的核心。它会首先使用 `current_source` 尝试获取
+        数据。如果失败（无论是发生异常还是返回了无效数据），它会自动触发
+        降级机制 `_try_fallback_sources`，按预设顺序尝试其他可用的数据源。
 
         Args:
-            symbol: 股票代码
-            start_date: 开始日期
-            end_date: 结束日期
+            symbol (str): 股票代码。
+            start_date (str, optional): 开始日期 (YYYY-MM-DD)。
+            end_date (str, optional): 结束日期 (YYYY-MM-DD)。
 
         Returns:
-            str: 格式化的股票数据
+            str: 格式化后的股票数据报告。如果所有数据源都失败，则返回
+                包含错误信息的字符串。
         """
         # 记录详细的输入参数
         logger.info(f"📊 [数据获取] 开始获取股票数据",

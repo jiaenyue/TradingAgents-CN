@@ -24,9 +24,36 @@ except ImportError:
 
 
 class MongoDBStorage:
-    """MongoDB存储适配器"""
+    """一个用于将 `UsageRecord` 对象持久化到 MongoDB 数据库的适配器。
+
+    该类封装了与 MongoDB 的所有交互，包括连接管理、数据插入、查询、
+    聚合统计以及数据清理。它会自动处理连接失败的情况，并能在连接成功时
+    自动创建索引以优化查询性能。
+
+    Attributes:
+        connection_string (str): 用于连接 MongoDB 的 URI。
+        database_name (str): 数据库名称。
+        collection_name (str): 集合（表）名称，默认为 'token_usage'。
+        client: `pymongo.MongoClient` 实例。
+        db: 数据库对象。
+        collection: 集合对象。
+    """
     
     def __init__(self, connection_string: str = None, database_name: str = "tradingagents"):
+        """初始化 MongoDBStorage 适配器。
+
+        在初始化时，它会检查 `pymongo` 库是否已安装，并尝试使用提供
+        的或从环境变量中获取的连接字符串来建立与数据库的连接。
+
+        Args:
+            connection_string: MongoDB 连接字符串。如果为 None，将尝试从
+                               `MONGODB_CONNECTION_STRING` 环境变量中获取。
+            database_name: 要使用的数据库名称，默认为 'tradingagents'。
+
+        Raises:
+            ImportError: 如果 `pymongo` 未安装。
+            ValueError: 如果连接字符串既未通过参数提供，也未在环境变量中设置。
+        """
         if not MONGODB_AVAILABLE:
             raise ImportError("pymongo is not installed. Please install it with: pip install pymongo")
         
@@ -98,11 +125,24 @@ class MongoDBStorage:
             logger.error(f"创建MongoDB索引失败: {e}")
     
     def is_connected(self) -> bool:
-        """检查是否连接到MongoDB"""
+        """检查当前是否成功连接到 MongoDB。
+
+        Returns:
+            如果连接处于活动状态，则返回 True；否则返回 False。
+        """
         return self._connected
     
     def save_usage_record(self, record: UsageRecord) -> bool:
-        """保存单个使用记录到MongoDB"""
+        """将一个 `UsageRecord` 对象保存到 MongoDB 集合中。
+
+        在插入前，记录会先被转换为字典，并添加一个 `_created_at` 时间戳。
+
+        Args:
+            record: 需要保存的 `UsageRecord` 对象。
+
+        Returns:
+            如果记录成功插入，则返回 True；否则返回 False。
+        """
         if not self._connected:
             return False
         
@@ -127,7 +167,17 @@ class MongoDBStorage:
             return False
     
     def load_usage_records(self, limit: int = 10000, days: int = None) -> List[UsageRecord]:
-        """从MongoDB加载使用记录"""
+        """从 MongoDB 加载使用记录。
+
+        可以按时间范围（最近 N 天）和数量限制进行查询。
+
+        Args:
+            limit: 返回记录的最大数量。
+            days: 可选参数，用于限定只查询最近指定天数内的记录。
+
+        Returns:
+            一个 `UsageRecord` 对象的列表。如果查询失败或无连接，返回空列表。
+        """
         if not self._connected:
             return []
         
@@ -163,7 +213,15 @@ class MongoDBStorage:
             return []
     
     def get_usage_statistics(self, days: int = 30) -> Dict[str, Any]:
-        """从MongoDB获取使用统计"""
+        """使用 MongoDB 聚合管道计算指定时间范围内的总体使用统计。
+
+        Args:
+            days: 要统计的天数。
+
+        Returns:
+            一个包含总成本、总 token 数和总请求数的字典。如果查询失败，
+            返回一个包含零值的字典。
+        """
         if not self._connected:
             return {}
         
@@ -214,7 +272,15 @@ class MongoDBStorage:
             return {}
     
     def get_provider_statistics(self, days: int = 30) -> Dict[str, Dict[str, Any]]:
-        """按供应商获取统计信息"""
+        """按 LLM 供应商分组，统计各自的使用情况。
+
+        Args:
+            days: 要统计的天数。
+
+        Returns:
+            一个字典，其键为供应商名称，值为包含该供应商成本、token 数
+            和请求数的统计字典。
+        """
         if not self._connected:
             return {}
         
@@ -259,7 +325,14 @@ class MongoDBStorage:
             return {}
     
     def cleanup_old_records(self, days: int = 90) -> int:
-        """清理旧记录"""
+        """从数据库中删除早于指定天数的旧记录。
+
+        Args:
+            days: 记录保留的最大天数。早于这个天数的记录将被删除。
+
+        Returns:
+            被删除的记录数量。
+        """
         if not self._connected:
             return 0
         
@@ -283,7 +356,7 @@ class MongoDBStorage:
             return 0
     
     def close(self):
-        """关闭MongoDB连接"""
+        """安全地关闭与 MongoDB 的连接。"""
         if self.client:
             self.client.close()
             self._connected = False

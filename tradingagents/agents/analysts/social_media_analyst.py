@@ -76,8 +76,50 @@ def _get_company_name_for_social_media(ticker: str, market_info: dict) -> str:
 
 
 def create_social_media_analyst(llm, toolkit):
+    """创建一个社交媒体与投资情绪分析师节点。
+
+    此函数构造并返回一个用于 LangChain 计算图的节点，该节点专门分析
+    社交媒体和投资社区中关于特定股票的讨论热度与情绪倾向。分析师的主要
+    任务是利用相关工具获取社交媒体数据，并评估这些情绪如何影响市场预期
+    和股票价格。
+
+    该节点的设计侧重于中国市场的特殊性，优先分析来自雪球、东方财富等
+    平台的情绪数据。
+
+    Args:
+        llm: 用于情绪分析和报告生成的大型语言模型实例。
+        toolkit: 提供数据获取工具的对象，如 `get_chinese_social_sentiment`
+                 或 `get_reddit_stock_info` 等。
+
+    Returns:
+        一个可直接在 LangChain 计算图中使用的函数（节点）。该节点接收当前状态，
+        执行社交媒体情绪分析，并返回包含分析报告的更新状态。
+    """
     @log_analyst_module("social_media")
     def social_media_analyst_node(state):
+        """LangChain 计算图中的一个节点，代表社交媒体分析师的工作流程。
+
+        此节点执行以下核心操作：
+        1. 从输入状态中提取交易日期和目标公司股票代码。
+        2. 识别股票市场信息并获取公司中文名称。
+        3. 根据在线/离线模式和股票市场选择合适的工具集，优先选择中国市场
+           的社交媒体情绪分析工具。
+        4. 构建一个详细的系统提示（System Prompt），指导 LLM 进行专业的
+           中国市场投资情绪分析，并明确要求量化情绪指标和评估价格影响。
+        5. 将 LLM 与工具绑定，并调用模型进行推理。
+        6. 对不同类型的 LLM 输出进行处理：
+           - 对 Google 模型使用 `GoogleToolCallHandler` 进行统一处理。
+           - 对其他模型，直接处理其响应。
+        7. 将生成的分析报告（情绪报告）更新到计算图的状态中。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 和
+                          'company_of_interest' 键。
+
+        Returns:
+            dict: 一个包含更新后的消息和情绪分析报告的字典，用于更新计算图
+                  的状态。
+        """
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         

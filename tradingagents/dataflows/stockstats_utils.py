@@ -1,3 +1,14 @@
+"""
+股票技术指标计算工具
+
+该模块提供了一个 `StockstatsUtils` 类, 用于利用 `stockstats` 库
+计算股票的各种技术分析指标。
+
+它支持两种数据加载模式:
+- **离线模式**: 从本地预存的 CSV 文件加载历史数据。
+- **在线模式**: 通过 `yfinance` 实时下载最新的历史数据, 并进行缓存。
+"""
+
 import pandas as pd
 import yfinance as yf
 from stockstats import wrap
@@ -7,6 +18,9 @@ from .config import get_config
 
 
 class StockstatsUtils:
+    """
+    一个工具类, 封装了使用 stockstats 库计算股票技术指标的静态方法。
+    """
     @staticmethod
     def get_stock_stats(
         symbol: Annotated[str, "ticker symbol for the company"],
@@ -25,6 +39,36 @@ class StockstatsUtils:
             "whether to use online tools to fetch data or offline tools. If True, will use online tools.",
         ] = False,
     ):
+        """
+        为指定的股票、在特定日期计算并返回一个技术指标的值。
+
+        该方法可以工作在两种模式下:
+        - 离线 (`online=False`): 从 `data_dir` 指定的目录中读取预先下载好的
+          CSV 文件。文件名应遵循特定格式。
+        - 在线 (`online=True`): 使用 `yfinance` 下载长达15年的历史数据,
+          并将其缓存在由 `config` 指定的目录中以备后用。
+
+        计算完成后, 它会查找指定日期 (`curr_date`) 的指标值并返回。
+
+        Args:
+            symbol (str): 公司的股票代码 (ticker symbol)。
+            indicator (str): 要计算的技术指标名称 (例如, 'rsi_14', 'macd')。
+                             这是 `stockstats` 库支持的指标。
+            curr_date (str): 要检索指标数据的目标日期, 格式为 "YYYY-MM-DD"。
+            data_dir (str): 在离线模式下, 存放股票数据CSV文件的目录。
+            online (bool, optional): 是否启用在线模式。如果为 True, 将会
+                                     通过网络下载数据; 否则, 尝试从本地
+                                     文件读取。默认为 False。
+
+        Returns:
+            float or str: 如果找到指定日期的指标, 返回其浮点数值。
+                          如果当天不是交易日 (例如周末或假日), 则返回
+                          字符串 "N/A: Not a trading day (weekend or holiday)"。
+
+        Raises:
+            Exception: 在离线模式下, 如果找不到所需的CSV数据文件, 则会
+                       引发此异常。
+        """
         df = None
         data = None
 

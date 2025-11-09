@@ -8,14 +8,27 @@ logger = get_logger('agents')
 
 
 def get_data_in_range(ticker, start_date, end_date, data_type, data_dir, period=None):
-    """
-    Gets finnhub data saved and processed on disk.
+    """从本地磁盘加载已经下载并预处理过的Finnhub数据。
+
+    该函数用于读取特定股票在指定日期范围内的本地Finnhub数据文件。
+    数据文件应为JSON格式，其中键是日期字符串（'YYYY-MM-DD'），值是
+    该日期对应的数据列表。
+
     Args:
-        start_date (str): Start date in YYYY-MM-DD format.
-        end_date (str): End date in YYYY-MM-DD format.
-        data_type (str): Type of data from finnhub to fetch. Can be insider_trans, SEC_filings, news_data, insider_senti, or fin_as_reported.
-        data_dir (str): Directory where the data is saved.
-        period (str): Default to none, if there is a period specified, should be annual or quarterly.
+        ticker (str): 股票代码。
+        start_date (str): 开始日期，格式为 'YYYY-MM-DD'。
+        end_date (str): 结束日期，格式为 'YYYY-MM-DD'。
+        data_type (str): 要获取的Finnhub数据类型。
+            可选值包括: 'insider_trans', 'SEC_filings', 'news_data',
+            'insider_senti', 'fin_as_reported'。
+        data_dir (str): 存储数据的根目录。
+        period (str, optional): 数据的报告周期，仅在某些数据类型
+            （如财务报告）下使用。可选值为 'annual' 或 'quarterly'。
+            默认为 None。
+
+    Returns:
+        dict: 一个字典，其中键是位于指定日期范围内的日期字符串，值是
+            对应的数据。如果文件不存在或发生错误，则返回一个空字典。
     """
 
     if period:

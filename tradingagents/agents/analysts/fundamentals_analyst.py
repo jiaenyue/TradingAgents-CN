@@ -82,8 +82,42 @@ def _get_company_name_for_fundamentals(ticker: str, market_info: dict) -> str:
 
 
 def create_fundamentals_analyst(llm, toolkit):
+    """创建一个基本面分析师节点。
+
+    此函数旨在构造并返回一个专用于股票基本面分析的 LangChain 计算图节点。
+    该分析师能够根据股票代码自动识别其所属市场（如A股、港股、美股），
+    并调用统一的工具接口获取财务数据、估值指标等基本面信息。
+
+    Args:
+        llm: 用于数据分析和报告生成的大型语言模型实例。
+        toolkit: 包含所有必要工具的对象，特别是 `get_stock_fundamentals_unified`
+                 等统一数据获取工具。
+
+    Returns:
+        一个可直接在 LangChain 计算图中使用的函数（节点）。该节点接收当前状态，
+        执行基本面分析，并返回包含分析报告的更新状态。
+    """
     @log_analyst_module("fundamentals")
     def fundamentals_analyst_node(state):
+        """LangChain 计算图中的一个节点，代表基本面分析师的工作流程。
+
+        此节点的核心职责是执行以下操作：
+        1. 从输入状态中获取交易日期和目标公司股票代码。
+        2. 利用 `StockUtils` 识别股票市场信息。
+        3. 调用内部函数 `_get_company_name_for_fundamentals` 获取公司名称。
+        4. 根据在线或离线模式选择合适的分析工具集。
+        5. 构建一个详细的系统提示（System Prompt），指导LLM进行专业的基本面分析。
+        6. 调用大型语言模型（LLM），并强制其使用工具获取真实数据。
+        7. 对LLM的输出进行处理，如果模型未能调用工具，则启动强制调用流程。
+        8. 最终生成一份包含公司估值、财务状况和投资建议的专业分析报告。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 和
+                          'company_of_interest' 键。
+
+        Returns:
+            dict: 一个包含基本面分析报告的字典，用于更新计算图的状态。
+        """
         logger.debug(f"📊 [DEBUG] ===== 基本面分析师节点开始 =====")
 
         current_date = state["trade_date"]

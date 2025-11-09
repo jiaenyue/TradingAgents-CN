@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 """
-改进的港股数据获取工具
-解决API速率限制和数据获取问题
+改进的港股数据获取工具。
+
+该模块提供了一个 `ImprovedHKStockProvider` 类，旨在解决直接调用
+API 时可能遇到的速率限制和数据获取不稳定的问题。它通过多层策略
+（内置映射、API调用、本地缓存）来提高获取港股公司名称和基本信息
+的成功率和效率。
+
+主要功能:
+- **多级数据源**: 优先使用内置的常见港股代码-名称映射，失败后尝试
+  调用外部API（如AKShare），最后生成默认名称。
+- **本地缓存**: 将获取到的数据（包括API结果和默认名称）缓存在本地
+  JSON 文件中，以减少不必要的网络请求。
+- **速率限制保护**: 在调用外部API前，会检查与上次请求的时间间隔，
+  确保不会因请求过于频繁而被服务器阻止。
+- **代码标准化**: 自动将不同格式的港股代码（如 '700', '0700.HK'）
+  统一处理。
 """
 
 import time
@@ -16,9 +30,26 @@ logger = get_logger("default")
 
 
 class ImprovedHKStockProvider:
-    """改进的港股数据提供器"""
+    """改进的港股数据提供器。
+
+    该类通过整合内置映射、外部API和本地缓存，提供了一个更健壮的
+    港股信息获取方案。
+
+    Attributes:
+        cache_file (str): 用于存储缓存数据的文件路径。
+        cache_ttl (int): 缓存的有效时间（秒），默认为24小时。
+        rate_limit_wait (int): 两次API请求之间的最小等待时间（秒）。
+        last_request_time (float): 上次API请求的时间戳。
+        hk_stock_names (Dict[str, str]): 内置的港股代码与公司名称的映射表。
+        cache (Dict[str, Any]): 从文件加载到内存的缓存数据。
+    """
     
     def __init__(self):
+        """初始化 `ImprovedHKStockProvider`。
+
+        此构造函数会设置缓存文件路径、TTL、速率限制参数，并加载
+        内置的港股名称映射表和本地缓存文件。
+        """
         self.cache_file = "hk_stock_cache.json"
         self.cache_ttl = 3600 * 24  # 24小时缓存
         self.rate_limit_wait = 5  # 速率限制等待时间
@@ -86,7 +117,10 @@ class ImprovedHKStockProvider:
         self._load_cache()
     
     def _load_cache(self):
-        """加载缓存"""
+        """从 JSON 文件加载缓存数据到内存。
+
+        如果缓存文件不存在或加载失败，会初始化一个空的缓存字典。
+        """
         try:
             if os.path.exists(self.cache_file):
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
@@ -98,7 +132,7 @@ class ImprovedHKStockProvider:
             self.cache = {}
     
     def _save_cache(self):
-        """保存缓存"""
+        """将内存中的缓存数据保存到 JSON 文件。"""
         try:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.cache, f, ensure_ascii=False, indent=2)
@@ -106,7 +140,14 @@ class ImprovedHKStockProvider:
             logger.debug(f"📊 [港股缓存] 保存缓存失败: {e}")
     
     def _is_cache_valid(self, key: str) -> bool:
-        """检查缓存是否有效"""
+        """检查指定键的缓存是否在有效期（TTL）内。
+
+        Args:
+            key (str): 要检查的缓存键。
+
+        Returns:
+            bool: 如果缓存存在且未过期，返回 True，否则返回 False。
+        """
         if key not in self.cache:
             return False
         
@@ -114,7 +155,16 @@ class ImprovedHKStockProvider:
         return (time.time() - cache_time) < self.cache_ttl
     
     def _normalize_hk_symbol(self, symbol: str) -> str:
-        """标准化港股代码"""
+        """将港股代码标准化为5位数字字符串。
+
+        例如，'0700.HK'、'700' 都会被处理成 '00700'。
+
+        Args:
+            symbol (str): 原始港股代码。
+
+        Returns:
+            str: 标准化后的5位数字代码。
+        """
         # 移除.HK后缀
         clean_symbol = symbol.replace('.HK', '').replace('.hk', '')
         
@@ -131,14 +181,21 @@ class ImprovedHKStockProvider:
         return clean_symbol
     
     def get_company_name(self, symbol: str) -> str:
-        """
-        获取港股公司名称
-        
+        """获取港股公司名称。
+
+        此方法按以下顺序获取名称：
+        1. 检查有效的本地缓存。
+        2. 查找内置的 `hk_stock_names` 映射表。
+        3. 调用外部API（如AKShare），并进行速率限制保护。
+        4. 如果以上都失败，生成一个格式为 "港股<代码>" 的默认名称。
+
+        成功获取的名称（包括默认名称）会被缓存到本地文件。
+
         Args:
-            symbol: 港股代码
-            
+            symbol (str): 港股代码。
+
         Returns:
-            str: 公司名称
+            str: 公司名称。
         """
         try:
             # 检查缓存
@@ -242,14 +299,17 @@ class ImprovedHKStockProvider:
             return f"港股{clean_symbol}"
     
     def get_stock_info(self, symbol: str) -> Dict[str, Any]:
-        """
-        获取港股基本信息
-        
+        """获取港股的综合基本信息。
+
+        此方法通过调用 `get_company_name` 获取公司名称，并组装成一个
+        包含标准化信息的字典。
+
         Args:
-            symbol: 港股代码
-            
+            symbol (str): 港股代码。
+
         Returns:
-            Dict: 港股信息
+            Dict[str, Any]: 包含股票代码、名称、货币、交易所等信息
+                的字典。如果发生错误，会返回一个包含错误信息的字典。
         """
         try:
             company_name = self.get_company_name(symbol)
@@ -281,7 +341,11 @@ class ImprovedHKStockProvider:
 _improved_hk_provider = None
 
 def get_improved_hk_provider() -> ImprovedHKStockProvider:
-    """获取改进的港股提供器实例"""
+    """获取 `ImprovedHKStockProvider` 的全局单例。
+
+    Returns:
+        ImprovedHKStockProvider: 全局提供器实例。
+    """
     global _improved_hk_provider
     if _improved_hk_provider is None:
         _improved_hk_provider = ImprovedHKStockProvider()
@@ -289,28 +353,26 @@ def get_improved_hk_provider() -> ImprovedHKStockProvider:
 
 
 def get_hk_company_name_improved(symbol: str) -> str:
-    """
-    获取港股公司名称的改进版本
-    
+    """获取港股公司名称的便捷函数（改进版）。
+
     Args:
-        symbol: 港股代码
-        
+        symbol (str): 港股代码。
+
     Returns:
-        str: 公司名称
+        str: 公司名称。
     """
     provider = get_improved_hk_provider()
     return provider.get_company_name(symbol)
 
 
 def get_hk_stock_info_improved(symbol: str) -> Dict[str, Any]:
-    """
-    获取港股信息的改进版本
-    
+    """获取港股基本信息的便捷函数（改进版）。
+
     Args:
-        symbol: 港股代码
-        
+        symbol (str): 港股代码。
+
     Returns:
-        Dict: 港股信息
+        Dict[str, Any]: 包含股票信息的字典。
     """
     provider = get_improved_hk_provider()
     return provider.get_stock_info(symbol)

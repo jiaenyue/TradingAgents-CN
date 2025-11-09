@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-DeepSeek直接适配器，不依赖langchain_openai，避免DefaultHttpxClient兼容性问题
+DeepSeek 直接适配器模块。
+
+该模块提供了一个 `DeepSeekDirectAdapter` 类，它不依赖于 `langchain` 或
+`langchain_openai`，而是直接使用 `openai` 官方 Python 库来与 DeepSeek 的
+OpenAI 兼容 API 端点进行交互。
+
+创建此适配器的主要动机是避免潜在的 `DefaultHttpxClient` 兼容性问题，
+并提供一个更轻量级、依赖更少的解决方案来调用 DeepSeek 模型。
 """
 
 import os
@@ -16,7 +23,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 class DeepSeekDirectAdapter:
-    """DeepSeek直接适配器，使用OpenAI库直接调用DeepSeek API"""
+    """
+    一个直接使用 `openai` 库与 DeepSeek API 进行交互的适配器。
+
+    此类封装了对 DeepSeek API 的直接调用，处理 API 密钥管理、
+    客户端初始化以及发送聊天请求。它提供了一个简单的 `invoke` 方法
+    来发送请求并获取响应。
+
+    **主要特点:**
+    - **轻量级:** 仅依赖 `openai` 和 `python-dotenv` 库。
+    - **兼容性:** 避免了 `langchain` 中可能出现的 HTTP 客户端兼容性问题。
+    - **简单易用:** 提供了类似于 LangChain 的 `invoke` 和 `chat` 方法。
+    """
     
     def __init__(
         self,
@@ -27,14 +45,17 @@ class DeepSeekDirectAdapter:
         base_url: str = "https://api.deepseek.com"
     ):
         """
-        初始化DeepSeek直接适配器
-        
+        初始化 `DeepSeekDirectAdapter`。
+
         Args:
-            model: 模型名称
-            temperature: 温度参数
-            max_tokens: 最大token数
-            api_key: API密钥，如果不提供则从环境变量获取
-            base_url: API基础URL
+            model (str, optional): 要使用的 DeepSeek 模型名称。默认为 "deepseek-chat"。
+            temperature (float, optional): 控制生成文本的随机性。默认为 0.1。
+            max_tokens (int, optional): 生成的最大 token 数量。默认为 1000。
+            api_key (Optional[str], optional): DeepSeek API 密钥。如果为 None, 将从环境变量 `DEEPSEEK_API_KEY` 读取。
+            base_url (str, optional): DeepSeek API 的基础 URL。默认为 "https://api.deepseek.com"。
+
+        Raises:
+            ValueError: 如果 API 密钥既没有在参数中提供，也没有在环境变量中设置。
         """
         self.model = model
         self.temperature = temperature
@@ -55,13 +76,22 @@ class DeepSeekDirectAdapter:
     
     def invoke(self, messages: Union[str, List[Dict[str, str]]]) -> str:
         """
-        调用DeepSeek API
-        
+        调用 DeepSeek API 以获取聊天响应。
+
+        此方法接受字符串或 OpenAI 格式的消息列表作为输入，然后调用
+        `openai` 客户端的 `chat.completions.create` 方法。
+
         Args:
-            messages: 消息内容，可以是字符串或消息列表
-            
+            messages (Union[str, List[Dict[str, str]]]): 输入的提示。
+                可以是一个简单的字符串（将被视为用户消息），或者是一个
+                符合 OpenAI API 格式的字典列表 (e.g., `[{"role": "user", "content": "..."}]`)。
+
         Returns:
-            str: 模型响应
+            str: 模型生成的文本响应内容。
+
+        Raises:
+            ValueError: 如果输入的 `messages` 不是支持的格式。
+            Exception: 如果 API 调用失败。
         """
         try:
             # 处理输入消息格式
@@ -90,26 +120,31 @@ class DeepSeekDirectAdapter:
     
     def chat(self, message: str) -> str:
         """
-        简单聊天接口
-        
+        一个简单的聊天接口，是对 `invoke` 方法的封装。
+
         Args:
-            message: 用户消息
-            
+            message (str): 用户的输入消息字符串。
+
         Returns:
-            str: 模型响应
+            str: 模型的文本响应。
         """
         return self.invoke(message)
     
     def analyze_with_tools(self, query: str, tools: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        使用工具进行分析
-        
+        使用提供的工具信息来引导模型进行分析。
+
+        **注意:** 此方法不执行实际的工具调用。它通过在提示中描述可用工具
+        来模拟工具的使用，让模型在其分析和推理过程中“考虑”这些工具。
+        这是一种基于提示工程的工具使用模拟，而不是真正的函数调用。
+
         Args:
-            query: 查询内容
-            tools: 可用工具列表
-            
+            query (str): 需要分析的用户查询。
+            tools (List[Dict[str, Any]]): 一个描述可用工具的字典列表。
+                                         每个字典应包含 'name' 和 'description'。
+
         Returns:
-            Dict: 分析结果
+            Dict[str, Any]: 一个包含分析结果、查询、所用工具列表（模拟）和状态的字典。
         """
         try:
             # 构建包含工具信息的提示
@@ -160,16 +195,16 @@ def create_deepseek_direct_adapter(
     **kwargs
 ) -> DeepSeekDirectAdapter:
     """
-    创建DeepSeek直接适配器的便捷函数
-    
+    一个便捷的工厂函数，用于创建 `DeepSeekDirectAdapter` 实例。
+
     Args:
-        model: 模型名称
-        temperature: 温度参数
-        max_tokens: 最大token数
-        **kwargs: 其他参数
-        
+        model (str, optional): 模型名称。默认为 "deepseek-chat"。
+        temperature (float, optional): 温度参数。默认为 0.1。
+        max_tokens (int, optional): 最大生成 token 数。默认为 1000。
+        **kwargs: 其他传递给 `DeepSeekDirectAdapter` 构造函数的关键字参数。
+
     Returns:
-        DeepSeekDirectAdapter: 适配器实例
+        DeepSeekDirectAdapter: 一个 `DeepSeekDirectAdapter` 的新实例。
     """
     return DeepSeekDirectAdapter(
         model=model,

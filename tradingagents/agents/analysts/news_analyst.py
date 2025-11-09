@@ -17,8 +17,51 @@ logger = get_logger("analysts.news")
 
 
 def create_news_analyst(llm, toolkit):
+    """创建一个财经新闻分析师节点。
+
+    此函数构造并返回一个用于 LangChain 计算图的节点，该节点专门负责分析
+    与特定股票相关的最新财经新闻。分析师的核心任务是调用统一的新闻工具，
+    获取实时新闻数据，并评估这些新闻对股票价格的潜在影响。
+
+    该节点内置了针对不同大型语言模型（LLM）的兼容性处理，包括为某些模型
+    （如 DashScope）预先获取数据，以及为未能主动调用工具的模型提供补救机制。
+
+    Args:
+        llm: 用于新闻分析和报告生成的大型语言模型实例。
+        toolkit: 提供所有必要工具的对象，特别是用于创建 `unified_news_tool`
+                 的工具集。
+
+    Returns:
+        一个可直接在 LangChain 计算图中使用的函数（节点）。该节点接收当前状态，
+        执行新闻分析，并返回包含分析报告和更新后消息的计算图状态。
+    """
     @log_analyst_module("news")
     def news_analyst_node(state):
+        """LangChain 计算图中的一个节点，代表新闻分析师的工作流程。
+
+        此节点执行以下核心操作：
+        1. 从输入状态中提取交易日期和目标公司股票代码。
+        2. 识别股票市场信息并获取公司中文名称。
+        3. 创建并配置一个统一的新闻工具 `get_stock_news_unified`，该工具能
+           自动处理不同市场（A股、港股、美股）的新闻获取。
+        4. 构建一个详细的系统提示（System Prompt），强制要求 LLM 必须调用工具
+           来获取真实数据，并详细说明了分析要求和报告格式。
+        5. 对特定模型（如 DashScope）进行预处理，强制在调用 LLM 前获取新闻，
+           以提高稳定性和效率。
+        6. 调用大型语言模型（LLM）并处理其响应：
+           - 对 Google 模型使用 `GoogleToolCallHandler` 进行统一处理。
+           - 对其他模型，检查是否有工具调用。若无，则启动强制补救机制，
+             主动获取新闻并要求 LLM 基于真实数据重新生成报告。
+        7. 为避免工作流陷入死循环，最终返回一个不含 `tool_calls` 的清洁
+           `AIMessage`。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 和
+                          'company_of_interest' 键。
+
+        Returns:
+            dict: 一个包含更新后的消息和新闻分析报告的字典，用于更新计算图的状态。
+        """
         start_time = datetime.now()
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]

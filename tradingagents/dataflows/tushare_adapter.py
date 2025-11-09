@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 """
-Tushare数据适配器
-提供统一的中国股票数据接口，支持缓存和错误处理
+Tushare 数据适配器
+
+该模块提供了一个 `TushareDataAdapter` 类, 旨在为 Tushare 数据源提供一个
+统一、健壮且带有缓存功能的接口。它封装了数据获取、标准化、缓存和
+错误处理的逻辑, 简化了上层应用对中国股票数据的调用。
+
+主要特性:
+- **统一接口**: 提供获取日线行情、基本面和股票信息的一致性方法。
+- **缓存优先**: 在请求数据时, 首先检查并使用有效的本地缓存, 减少
+  不必要的 API 调用, 提高响应速度。
+- **数据标准化**: 将从 Tushare 获取的原始数据 (例如, 'vol' 列) 转换
+  为更通用、更标准的格式 (例如, 'volume' 列), 增强了代码的兼容性
+  和可维护性。
+- **优雅降级**: 在 Tushare 连接失败或不可用时, 会记录明确的错误信息,
+  并返回空数据结构, 避免程序崩溃。
 """
 
 import pandas as pd
@@ -33,14 +46,24 @@ except ImportError:
 
 
 class TushareDataAdapter:
-    """Tushare数据适配器"""
+    """
+    Tushare 数据适配器类。
+
+    封装了与 Tushare 数据源的所有交互, 包括初始化连接、数据请求、
+    缓存管理和数据格式化。
+    """
     
     def __init__(self, enable_cache: bool = True):
         """
-        初始化Tushare数据适配器
-        
+        初始化 Tushare 数据适配器。
+
+        在初始化过程中, 它会尝试连接到 Tushare 服务并准备缓存管理器。
+        如果任何一步失败, 它会记录警告但不会中断程序的执行。
+
         Args:
-            enable_cache: 是否启用缓存
+            enable_cache (bool): 是否启用缓存功能。如果 `CACHE_AVAILABLE`
+                                 为 False, 即使此项为 True, 缓存也
+                                 不会被启用。
         """
         self.enable_cache = enable_cache and CACHE_AVAILABLE
         self.provider = None
@@ -71,16 +94,21 @@ class TushareDataAdapter:
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None, 
                       data_type: str = "daily") -> pd.DataFrame:
         """
-        获取股票数据
-        
+        获取股票的历史行情数据。
+
+        根据 `data_type` 参数, 它可以获取日线数据或模拟的“实时”数据
+        (即最新的日线数据)。
+
         Args:
-            symbol: 股票代码
-            start_date: 开始日期
-            end_date: 结束日期
-            data_type: 数据类型 ("daily", "realtime")
+            symbol (str): 股票代码, 例如 '600519.SH'。
+            start_date (str, optional): 开始日期, 格式 'YYYY-MM-DD'。
+            end_date (str, optional): 结束日期, 格式 'YYYY-MM-DD'。
+            data_type (str, optional): 数据类型, "daily" (日线) 或
+                                       "realtime" (实时)。默认为 "daily"。
             
         Returns:
-            DataFrame: 股票数据
+            pd.DataFrame: 包含标准化股票数据的 DataFrame。如果获取失败或
+                          Tushare 不可用, 返回一个空的 DataFrame。
         """
         if not self.provider or not self.provider.connected:
             logger.error("❌ Tushare数据源不可用")
@@ -108,7 +136,20 @@ class TushareDataAdapter:
             return pd.DataFrame()
     
     def _get_daily_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
-        """获取日线数据"""
+        """
+        (内部方法) 获取日线数据, 实现缓存优先逻辑。
+
+        首先尝试从缓存加载数据, 如果缓存未命中或已过期, 再通过 Tushare API
+        获取, 并将新获取的数据存入缓存。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str, optional): 开始日期。
+            end_date (str, optional): 结束日期。
+
+        Returns:
+            pd.DataFrame: 标准化的日线数据。
+        """
 
         # 记录详细的调用信息
         logger.info(f"🔍 [TushareAdapter详细日志] _get_daily_data 开始执行")
@@ -189,7 +230,18 @@ class TushareDataAdapter:
             return pd.DataFrame()
     
     def _get_realtime_data(self, symbol: str) -> pd.DataFrame:
-        """获取实时数据（使用最新日线数据）"""
+        """
+        (内部方法) 获取模拟的实时数据。
+
+        由于免费版 Tushare 不提供实时行情, 此方法通过获取最近几天的日线数据,
+        并返回最新一条来模拟实时数据。
+
+        Args:
+            symbol (str): 股票代码。
+
+        Returns:
+            pd.DataFrame: 包含最新一条日线数据的 DataFrame。
+        """
         
         # Tushare免费版不支持实时数据，使用最新日线数据
         end_date = datetime.now().strftime('%Y-%m-%d')
@@ -207,7 +259,18 @@ class TushareDataAdapter:
             return pd.DataFrame()
     
     def _validate_and_standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """验证并标准化数据格式，增强版本（修复KeyError: 'volume'问题）"""
+        """
+        (内部方法) 验证并标准化数据格式, 确保列名和格式的统一性。
+
+        此方法负责将 Tushare 返回的原始 DataFrame 转换为系统中其他部分
+        所期望的格式, 例如, 将 'vol' 重命名为 'volume'。
+
+        Args:
+            data (pd.DataFrame): 从 Tushare 或缓存中获取的原始数据。
+
+        Returns:
+            pd.DataFrame: 标准化后的数据。
+        """
         if data.empty:
             logger.info("🔍 [数据标准化] 输入数据为空，直接返回")
             return data
@@ -276,7 +339,14 @@ class TushareDataAdapter:
             return data
 
     def _add_fallback_columns(self, standardized: pd.DataFrame, missing_columns: list, original_data: pd.DataFrame):
-        """为缺失的关键列添加备用值"""
+        """
+        (内部辅助方法) 为缺失的关键列添加备用值或从备选列中填充。
+
+        Args:
+            standardized (pd.DataFrame): 正在进行标准化的 DataFrame。
+            missing_columns (list): 缺失的关键列名列表。
+            original_data (pd.DataFrame): 用于查找备选列的原始数据。
+        """
         try:
             import numpy as np
             for col in missing_columns:
@@ -303,18 +373,28 @@ class TushareDataAdapter:
             logger.error(f"❌ [数据标准化] 添加备用列失败: {e}")
 
     def _standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """标准化数据格式 - 保持向后兼容性，调用增强版本"""
+        """
+        (内部方法) 标准化数据格式, 保持向后兼容性。
+        此方法简单调用增强版的验证和标准化函数。
+
+        Args:
+            data (pd.DataFrame): 原始数据。
+
+        Returns:
+            pd.DataFrame: 标准化后的数据。
+        """
         return self._validate_and_standardize_data(data)
     
     def get_stock_info(self, symbol: str) -> Dict:
         """
-        获取股票基本信息
-        
+        获取单只股票的基本信息。
+
         Args:
-            symbol: 股票代码
+            symbol (str): 股票代码。
             
         Returns:
-            Dict: 股票基本信息
+            Dict: 包含股票基本信息的字典。如果获取失败, 返回一个
+                  包含默认值的字典。
         """
         if not self.provider or not self.provider.connected:
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
@@ -333,13 +413,14 @@ class TushareDataAdapter:
     
     def search_stocks(self, keyword: str) -> pd.DataFrame:
         """
-        搜索股票
-        
+        根据关键词搜索相关的股票。
+
         Args:
-            keyword: 搜索关键词
+            keyword (str): 搜索关键词, 可以是股票代码、名称或拼音首字母。
             
         Returns:
-            DataFrame: 搜索结果
+            pd.DataFrame: 包含搜索结果的 DataFrame, 列包括 'code', 'name' 等。
+                          如果无结果或失败, 返回空 DataFrame。
         """
         if not self.provider or not self.provider.connected:
             logger.error("❌ Tushare数据源不可用")
@@ -361,13 +442,16 @@ class TushareDataAdapter:
     
     def get_fundamentals(self, symbol: str) -> str:
         """
-        获取基本面数据
-        
+        获取股票的基本面数据并生成一份格式化的分析报告。
+
+        报告内容包括公司基本信息和最新的财务数据摘要。
+
         Args:
-            symbol: 股票代码
+            symbol (str): 股票代码。
             
         Returns:
-            str: 基本面分析报告
+            str: 格式化的人类可读的基本面分析报告字符串。如果失败,
+                 返回错误信息字符串。
         """
         if not self.provider or not self.provider.connected:
             return f"❌ Tushare数据源不可用，无法获取{symbol}基本面数据"
@@ -403,7 +487,17 @@ class TushareDataAdapter:
             return f"❌ 获取{symbol}基本面数据失败: {e}"
     
     def _generate_fundamentals_report(self, symbol: str, stock_info: Dict, financial_data: Dict) -> str:
-        """生成基本面分析报告"""
+        """
+        (内部方法) 根据原始数据生成基本面分析报告的文本。
+
+        Args:
+            symbol (str): 股票代码。
+            stock_info (Dict): 股票基本信息字典。
+            financial_data (Dict): 包含财务报表数据的字典。
+
+        Returns:
+            str: 格式化的报告字符串。
+        """
         
         report = f"📊 {symbol} 基本面分析报告 (Tushare数据源)\n"
         report += "=" * 50 + "\n\n"
@@ -455,7 +549,12 @@ class TushareDataAdapter:
 _tushare_adapter = None
 
 def get_tushare_adapter() -> TushareDataAdapter:
-    """获取全局Tushare数据适配器实例"""
+    """
+    获取全局唯一的 TushareDataAdapter 实例 (单例模式)。
+
+    Returns:
+        TushareDataAdapter: 全局适配器实例。
+    """
     global _tushare_adapter
     if _tushare_adapter is None:
         _tushare_adapter = TushareDataAdapter()
@@ -464,15 +563,17 @@ def get_tushare_adapter() -> TushareDataAdapter:
 
 def get_china_stock_data_tushare_adapter(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
     """
-    获取中国股票数据的便捷函数（Tushare适配器）
-    
+    获取中国股票行情数据的便捷函数。
+
+    这是对 `TushareDataAdapter.get_stock_data` 的简单封装。
+
     Args:
-        symbol: 股票代码
-        start_date: 开始日期
-        end_date: 结束日期
+        symbol (str): 股票代码。
+        start_date (str, optional): 开始日期。
+        end_date (str, optional): 结束日期。
         
     Returns:
-        DataFrame: 股票数据
+        pd.DataFrame: 股票数据 DataFrame。
     """
     adapter = get_tushare_adapter()
     return adapter.get_stock_data(symbol, start_date, end_date)
@@ -480,13 +581,15 @@ def get_china_stock_data_tushare_adapter(symbol: str, start_date: str = None, en
 
 def get_china_stock_info_tushare_adapter(symbol: str) -> Dict:
     """
-    获取中国股票信息的便捷函数（Tushare适配器）
+    获取中国股票基本信息的便捷函数。
+
+    这是对 `TushareDataAdapter.get_stock_info` 的简单封装。
     
     Args:
-        symbol: 股票代码
+        symbol (str): 股票代码。
         
     Returns:
-        Dict: 股票信息
+        Dict: 包含股票信息的字典。
     """
     adapter = get_tushare_adapter()
     return adapter.get_stock_info(symbol)

@@ -1,7 +1,13 @@
 """
-阿里百炼 OpenAI兼容适配器
-为 TradingAgents 提供阿里百炼大模型的 OpenAI 兼容接口
-利用百炼模型的原生 OpenAI 兼容性，无需额外的工具转换
+阿里百炼 (DashScope) OpenAI 兼容适配器模块。
+
+该模块提供了一个 `ChatDashScopeOpenAI` 类，它继承自 `langchain_openai.ChatOpenAI`。
+这个适配器的主要目的是利用 DashScope 提供的 OpenAI 兼容 API 端点，从而能够
+无缝地使用 LangChain 中为 OpenAI 模型设计的各种功能，尤其是原生的工具调用
+(Function Calling)。
+
+通过使用这个适配器，开发者可以用与 `ChatOpenAI` 完全相同的方式来调用
+通义千问系列模型，而无需修改应用层代码。
 """
 
 import os
@@ -18,13 +24,53 @@ logger = get_logger('agents')
 
 class ChatDashScopeOpenAI(ChatOpenAI):
     """
-    阿里百炼 OpenAI 兼容适配器
-    继承 ChatOpenAI，通过 OpenAI 兼容接口调用百炼模型
-    利用百炼模型的原生 OpenAI 兼容性，支持原生 Function Calling
+    一个通过 OpenAI 兼容接口与阿里百炼 (DashScope) 模型交互的 LangChain 适配器。
+
+    此类继承自 `ChatOpenAI`，并预先配置了连接到 DashScope 的 OpenAI 兼容
+    API 端点所需的所有设置（如 `base_url`）。这使得它能够原生支持 LangChain
+    中的工具调用 (Function Calling) 和其他 OpenAI 特定的功能。
+
+    **核心优势:**
+    - **原生工具调用:** 无需任何额外的转换或提示工程即可使用 LangChain 的工具调用功能。
+    - **代码兼容性:** 可以作为 `ChatOpenAI` 的直接替代品，无需修改现有代码。
+    - **Token 追踪:** 重写了 `_generate` 方法以自动追踪和记录 token 使用量。
+
+    **使用示例:**
+    ```python
+    from tradingagents.llm_adapters import ChatDashScopeOpenAI
+    from langchain_core.tools import tool
+
+    @tool
+    def get_stock_price(symbol: str) -> float:
+        \"\"\"获取股票价格的工具\"\"\"
+        # ... 实现 ...
+        return 123.45
+
+    # 初始化模型并绑定工具
+    llm = ChatDashScopeOpenAI(model="qwen-plus")
+    llm_with_tools = llm.bind_tools([get_stock_price])
+
+    # 调用模型
+    response = llm_with_tools.invoke("阿里巴巴的股价是多少?")
+    print(response.tool_calls)
+    ```
     """
     
     def __init__(self, **kwargs):
-        """初始化 DashScope OpenAI 兼容客户端"""
+        """
+        初始化 `ChatDashScopeOpenAI` 实例。
+
+        此构造函数会自动设置连接到 DashScope OpenAI 兼容端点的 `base_url`。
+        同时，它会从环境变量 `DASHSCOPE_API_KEY` 或传入的 `api_key` 参数中
+        获取 API 密钥。
+
+        Args:
+            **kwargs: 传递给 `ChatOpenAI` 父类构造函数的关键字参数。
+                      可以覆盖 `model`, `api_key`, `temperature` 等默认值。
+
+        Raises:
+            ValueError: 如果 API 密钥既没有在参数中提供，也没有在环境变量中设置。
+        """
         
         # 设置 DashScope OpenAI 兼容接口的默认配置
         kwargs.setdefault("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -51,7 +97,20 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         logger.info(f"   API Base: {api_base}")
     
     def _generate(self, *args, **kwargs):
-        """重写生成方法，添加 token 使用量追踪"""
+        """
+        重写父类的 `_generate` 方法，以增加 token 使用量追踪功能。
+
+        该方法首先调用 `ChatOpenAI` 的原始 `_generate` 方法来获取 LLM 的响应。
+        然后，它从返回的 `ChatResult` 对象中提取 `token_usage` 信息，并
+        使用全局的 `token_tracker` 实例来记录本次调用的输入和输出 token 数量。
+
+        Args:
+            *args: 传递给父类 `_generate` 方法的位置参数。
+            **kwargs: 传递给父类 `_generate` 方法的关键字参数。
+
+        Returns:
+            ChatResult: 从父类 `_generate` 方法返回的原始 `ChatResult` 对象。
+        """
         
         # 调用父类的生成方法
         result = super()._generate(*args, **kwargs)
@@ -130,7 +189,13 @@ DASHSCOPE_OPENAI_MODELS = {
 
 
 def get_available_openai_models() -> Dict[str, Dict[str, Any]]:
-    """获取可用的 DashScope OpenAI 兼容模型列表"""
+    """
+    获取通过 OpenAI 兼容接口可用的 DashScope 模型及其元数据。
+
+    Returns:
+        Dict[str, Dict[str, Any]]: 一个字典，键是模型名称，值是包含
+                                  描述、上下文长度、工具调用支持等信息的元数据字典。
+    """
     return DASHSCOPE_OPENAI_MODELS
 
 
@@ -141,7 +206,19 @@ def create_dashscope_openai_llm(
     max_tokens: int = 2000,
     **kwargs
 ) -> ChatDashScopeOpenAI:
-    """创建 DashScope OpenAI 兼容 LLM 实例的便捷函数"""
+    """
+    一个便捷的工厂函数，用于创建 `ChatDashScopeOpenAI` 实例。
+
+    Args:
+        model (str, optional): 模型名称。默认为 "qwen-plus-latest"。
+        api_key (Optional[str], optional): API 密钥。默认为 None，将从环境变量读取。
+        temperature (float, optional): 温度参数。默认为 0.1。
+        max_tokens (int, optional): 最大生成 token 数。默认为 2000。
+        **kwargs: 其他传递给 `ChatDashScopeOpenAI` 构造函数的关键字参数。
+
+    Returns:
+        ChatDashScopeOpenAI: 一个 `ChatDashScopeOpenAI` 的新实例。
+    """
     
     return ChatDashScopeOpenAI(
         model=model,
@@ -156,7 +233,19 @@ def test_dashscope_openai_connection(
     model: str = "qwen-turbo",
     api_key: Optional[str] = None
 ) -> bool:
-    """测试 DashScope OpenAI 兼容接口连接"""
+    """
+    测试与 DashScope OpenAI 兼容接口的连接。
+
+    该函数会创建一个 `ChatDashScopeOpenAI` 实例并发送一条测试消息，
+    以验证 API 密钥和网络连接是否正常。
+
+    Args:
+        model (str, optional): 用于测试的模型名称。默认为 "qwen-turbo"。
+        api_key (Optional[str], optional): 用于测试的 API 密钥。默认为 None。
+
+    Returns:
+        bool: 如果连接成功并收到有效响应，则返回 True，否则返回 False。
+    """
     
     try:
         logger.info(f"🧪 测试 DashScope OpenAI 兼容接口连接")
@@ -189,7 +278,19 @@ def test_dashscope_openai_function_calling(
     model: str = "qwen-plus-latest",
     api_key: Optional[str] = None
 ) -> bool:
-    """测试 DashScope OpenAI 兼容接口的 Function Calling"""
+    """
+    测试 DashScope OpenAI 兼容接口的工具调用 (Function Calling) 功能。
+
+    该函数会定义一个简单的测试工具，将其绑定到模型，然后发出一个
+    明确需要使用该工具的请求，以验证模型是否能正确地生成工具调用指令。
+
+    Args:
+        model (str, optional): 用于测试的模型名称。默认为 "qwen-plus-latest"。
+        api_key (Optional[str], optional): 用于测试的 API 密钥。默认为 None。
+
+    Returns:
+        bool: 如果模型成功生成了预期的工具调用，则返回 True，否则返回 False。
+    """
     
     try:
         logger.info(f"🧪 测试 DashScope OpenAI Function Calling")

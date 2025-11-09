@@ -18,7 +18,15 @@ logger = get_logger('agents')
 
 
 def is_rate_limited(response):
-    """Check if the response indicates rate limiting (status code 429)"""
+    """检查HTTP响应是否表示受到了速率限制。
+
+    Args:
+        response: requests的响应对象。
+
+    Returns:
+        bool: 如果响应状态码为 429 (Too Many Requests)，则返回 True，
+            否则返回 False。
+    """
     return response.status_code == 429
 
 
@@ -28,7 +36,23 @@ def is_rate_limited(response):
     stop=stop_after_attempt(5),
 )
 def make_request(url, headers):
-    """Make a request with retry logic for rate limiting and connection issues"""
+    """发起一个带有健壮重试逻辑的HTTP GET请求。
+
+    该函数使用 `tenacity` 库来自动处理以下情况：
+    - 速率限制 (HTTP 429)。
+    - 连接错误 (`requests.exceptions.ConnectionError`)。
+    - 超时 (`requests.exceptions.Timeout`)。
+
+    重试策略采用指数退避，最多尝试5次。同时，在每次请求前会加入一个
+    随机延迟，以模拟更自然的用户行为，减少被服务器检测到的风险。
+
+    Args:
+        url (str): 要请求的URL。
+        headers (dict): 请求头。
+
+    Returns:
+        requests.Response: HTTP响应对象。
+    """
     # Random delay before each request to avoid detection
     time.sleep(random.uniform(2, 6))
     # 添加超时参数，设置连接超时和读取超时
@@ -37,11 +61,19 @@ def make_request(url, headers):
 
 
 def getNewsData(query, start_date, end_date):
-    """
-    Scrape Google News search results for a given query and date range.
-    query: str - search query
-    start_date: str - start date in the format yyyy-mm-dd or mm/dd/yyyy
-    end_date: str - end date in the format yyyy-mm-dd or mm/dd/yyyy
+    """从Google News抓取指定查询和日期范围的新闻数据。
+
+    该函数会模拟浏览器行为，通过分页方式抓取Google News搜索结果页面，
+    并使用BeautifulSoup解析HTML，提取每条新闻的标题、链接、摘要、
+    日期和来源。
+
+    Args:
+        query (str): 搜索关键词。
+        start_date (str): 开始日期，支持 'yyyy-mm-dd' 或 'mm/dd/yyyy' 格式。
+        end_date (str): 结束日期，支持 'yyyy-mm-dd' 或 'mm/dd/yyyy' 格式。
+
+    Returns:
+        list: 一个包含新闻数据的字典列表，每个字典代表一条新闻。
     """
     if "-" in start_date:
         start_date = datetime.strptime(start_date, "%Y-%m-%d")

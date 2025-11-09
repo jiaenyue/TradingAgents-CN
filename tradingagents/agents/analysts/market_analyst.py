@@ -81,9 +81,40 @@ def _get_company_name(ticker: str, market_info: dict) -> str:
 
 
 def create_market_analyst_react(llm, toolkit):
-    """使用ReAct Agent模式的市场分析师（适用于通义千问）"""
+    """创建一个采用 ReAct (Reasoning and Acting) Agent 模式的市场分析师节点。
+
+    该函数专门为支持 ReAct 模式的大型语言模型（如通义千问）设计。它构造并返回
+    一个 LangChain 计算图节点，该节点利用 Agent Executor 动态地选择和执行工具，
+    以完成对指定股票的技术分析任务。
+
+    Args:
+        llm: 支持 ReAct 模式的大型语言模型实例。
+        toolkit: 提供数据获取工具的对象，例如获取中国A股或美股/港股的市场数据。
+
+    Returns:
+        一个可用于 LangChain 计算图的函数（节点），该函数接收当前状态，
+        通过 ReAct Agent 执行市场分析，并返回包含分析报告的更新状态。
+    """
     @log_analyst_module("market_react")
     def market_analyst_react_node(state):
+        """LangChain 计算图中的一个节点，代表 ReAct 市场分析师的工作流程。
+
+        此节点执行以下关键操作：
+        1. 从输入状态中获取交易日期和目标股票代码。
+        2. 判断股票类型（中国A股或美股/港股）以选择合适的工具集。
+        3. 动态创建专用的工具类（如 `ChinaStockDataTool`），封装数据获取逻辑。
+        4. 构建一个详细的查询（Query），指导 ReAct Agent 的分析步骤和报告格式。
+        5. 初始化 `create_react_agent` 和 `AgentExecutor` 来运行分析流程。
+        6. Agent Executor 会自动处理工具的调用、观察和思考过程，直至生成最终报告。
+        7. 将生成的报告整合到计算图的状态中。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 和
+                          'company_of_interest' 键。
+
+        Returns:
+            dict: 一个包含新消息和市场分析报告的字典，用于更新计算图的状态。
+        """
         logger.debug(f"📈 [DEBUG] ===== ReAct市场分析师节点开始 =====")
 
         current_date = state["trade_date"]
@@ -264,8 +295,48 @@ def create_market_analyst_react(llm, toolkit):
 
 
 def create_market_analyst(llm, toolkit):
+    """创建一个标准模式的市场（技术）分析师节点。
 
+    此函数构造并返回一个用于 LangChain 计算图的节点，该节点封装了市场分析师的
+    标准工作流程。分析师利用大型语言模型（LLM）和一套预定义的工具来对指定股票
+    进行技术分析，并生成分析报告。
+
+    与 `create_market_analyst_react` 不同，此版本不使用 ReAct Agent 模式，
+    而是依赖于 LLM 对工具的直接调用和后续的分析生成。
+
+    Args:
+        llm: 用于分析和生成报告的大型语言模型实例。
+        toolkit: 提供数据获取工具的对象，如 `get_stock_market_data_unified`。
+
+    Returns:
+        一个可用于 LangChain 计算图的函数（节点），该函数接收当前状态，
+        执行技术分析，并返回包含分析结果的更新状态。
+    """
     def market_analyst_node(state):
+        """LangChain 计算图中的一个节点，代表标准市场分析师的工作流程。
+
+        该节点执行以下操作：
+        1. 从输入状态中获取交易日期和目标股票代码。
+        2. 利用 `StockUtils` 识别股票市场信息。
+        3. 获取公司中文名称。
+        4. 根据在线/离线模式选择合适的工具集，优先使用统一的市场数据工具。
+        5. 构建一个详细的系统提示（System Prompt），指导 LLM 进行专业的技术分析，
+           并指定报告的格式和内容要求。
+        6. 将 LLM 与工具绑定，并调用模型进行推理。
+        7. 处理 LLM 的响应：
+           - 如果是 Google 模型，则使用 `GoogleToolCallHandler` 进行统一处理。
+           - 如果是非 Google 模型且有工具调用，则执行工具，并将结果返回给 LLM
+             以生成最终报告。
+           - 如果没有工具调用，则直接使用 LLM 的内容作为报告。
+        8. 将最终报告和消息更新到计算图的状态中。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 和
+                          'company_of_interest' 键。
+
+        Returns:
+            dict: 一个包含新消息和市场分析报告的字典，用于更新计算图的状态。
+        """
         logger.debug(f"📈 [DEBUG] ===== 市场分析师节点开始 =====")
 
         current_date = state["trade_date"]

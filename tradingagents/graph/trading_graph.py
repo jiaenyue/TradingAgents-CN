@@ -38,7 +38,14 @@ from .signal_processing import SignalProcessor
 
 
 class TradingAgentsGraph:
-    """Main class that orchestrates the trading agents framework."""
+    """
+    协调交易代理框架的主要类。
+
+    这个类负责整个交易代理系统的初始化、配置和执行。
+    它根据提供的配置设置语言模型（LLMs）、记忆模块、工具包，
+    并构建一个可执行的计算图（graph）。它还提供了用于运行图、
+    处理输出信号以及根据交易结果进行反思和记忆更新的方法。
+    """
 
     def __init__(
         self,
@@ -46,12 +53,16 @@ class TradingAgentsGraph:
         debug=False,
         config: Dict[str, Any] = None,
     ):
-        """Initialize the trading agents graph and components.
+        """
+        初始化交易代理图和所有相关组件。
 
         Args:
-            selected_analysts: List of analyst types to include
-            debug: Whether to run in debug mode
-            config: Configuration dictionary. If None, uses default config
+            selected_analysts (list, optional): 要包含在图中的分析师类型列表。
+                默认为 ["market", "social", "news", "fundamentals"]。
+            debug (bool, optional): 是否以调试模式运行。在调试模式下，会打印详细的执行跟踪信息。
+                默认为 False。
+            config (Dict[str, Any], optional): 配置字典。如果为 None，则使用默认配置。
+                该配置字典控制着LLM提供商、模型、API密钥、项目目录等关键参数。
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
@@ -285,7 +296,15 @@ class TradingAgentsGraph:
         self.graph = self.graph_setup.setup_graph(selected_analysts)
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
-        """Create tool nodes for different data sources."""
+        """
+        為不同的數據源創建工具節點。
+
+        這個方法將工具包中的特定工具分組，為每種分析師類型
+        （市場、社交媒體、新聞、基本面）創建一個專用的 `ToolNode`。
+
+        Returns:
+            Dict[str, ToolNode]: 一個字典，將分析師類型映射到其對應的 `ToolNode`。
+        """
         return {
             "market": ToolNode(
                 [
@@ -332,7 +351,23 @@ class TradingAgentsGraph:
         }
 
     def propagate(self, company_name, trade_date):
-        """Run the trading agents graph for a company on a specific date."""
+        """
+        在特定日期为指定公司运行交易代理图。
+
+        这是执行代理工作流的主要入口点。它首先初始化图的状态，
+        然后调用图（在标准模式或调试模式下），处理执行流程，
+        记录最终状态，并返回最终状态和处理后的交易信号。
+
+        Args:
+            company_name (str): 公司的股票代码或名称。
+            trade_date (str or date): 进行交易分析的日期。
+
+        Returns:
+            Tuple[Dict[str, Any], Dict[str, Any]]:
+                一个元组，包含：
+                - final_state (Dict[str, Any]): 图执行后的最终状态字典。
+                - processed_signal (Dict[str, Any]): 从最终决策中提取的结构化交易信号。
+        """
 
         # 添加详细的接收日志
         logger.debug(f"🔍 [GRAPH DEBUG] ===== TradingAgentsGraph.propagate 接收参数 =====")
@@ -376,7 +411,16 @@ class TradingAgentsGraph:
         return final_state, self.process_signal(final_state["final_trade_decision"], company_name)
 
     def _log_state(self, trade_date, final_state):
-        """Log the final state to a JSON file."""
+        """
+        将最终状态记录到JSON文件中。
+
+        此方法将每次运行的关键信息（如分析报告、辩论历史、最终决策等）
+        保存到特定股票代码的日志文件中，以便于后续评估和调试。
+
+        Args:
+            trade_date (str or date): 交易日期，用作日志字典的键。
+            final_state (Dict[str, Any]): 图执行后的最终状态。
+        """
         self.log_states_dict[str(trade_date)] = {
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
@@ -418,7 +462,17 @@ class TradingAgentsGraph:
             json.dump(self.log_states_dict, f, indent=4)
 
     def reflect_and_remember(self, returns_losses):
-        """Reflect on decisions and update memory based on returns."""
+        """
+        根据回报/损失对决策进行反思，并更新记忆。
+
+        在 `propagate` 运行并产生一个决策后，此方法被调用以评估该决策的
+        财务结果。它利用 `Reflector` 类为每个参与决策的角色
+        （如牛/熊市研究员、交易员等）生成反思，并将这些学习到的经验
+        存入各自的记忆库中。
+
+        Args:
+            returns_losses (any): 表示决策结果的财务回报或损失。
+        """
         self.reflector.reflect_bull_researcher(
             self.curr_state, returns_losses, self.bull_memory
         )
@@ -436,5 +490,17 @@ class TradingAgentsGraph:
         )
 
     def process_signal(self, full_signal, stock_symbol=None):
-        """Process a signal to extract the core decision."""
+        """
+        处理信号以提取核心决策。
+
+        这是一个便利方法，它调用 `SignalProcessor` 实例来解析
+        一个完整的交易信号文本，并返回一个结构化的决策字典。
+
+        Args:
+            full_signal (str): 完整的交易信号文本。
+            stock_symbol (str, optional): 股票代码，用于提供上下文。默认为 None。
+
+        Returns:
+            dict: 包含结构化决策信息的字典。
+        """
         return self.signal_processor.process_signal(full_signal, stock_symbol)

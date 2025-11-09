@@ -11,9 +11,30 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
 class DatabaseManager:
-    """智能数据库管理器"""
+    """一个智能数据库管理器，用于自动检测和管理数据库连接。
+
+    该类的核心功能是在初始化时自动检测 MongoDB 和 Redis 服务的可用性，
+    并根据检测结果智能地选择最合适的缓存后端（优先使用 Redis，然后是
+    MongoDB，最后降级到文件系统）。它从环境变量中加载配置，并提供
+    了获取数据库客户端、检查服务状态和获取配置信息的接口。
+
+    Attributes:
+        mongodb_available (bool): 如果 MongoDB 连接可用，则为 True。
+        redis_available (bool): 如果 Redis 连接可用，则为 True。
+        mongodb_client: 一个 `pymongo.MongoClient` 实例，如果连接成功。
+        redis_client: 一个 `redis.Redis` 实例，如果连接成功。
+        primary_backend (str): 自动选择的主要缓存后端 ('redis', 'mongodb', or 'file')。
+    """
 
     def __init__(self):
+        """初始化 DatabaseManager。
+
+        在初始化过程中，它会执行以下操作：
+        1. 加载 .env 文件中的数据库配置。
+        2. 检测 MongoDB 和 Redis 的可用性。
+        3. 根据检测结果初始化数据库连接。
+        4. 设置主要的缓存后端。
+        """
         self.logger = logging.getLogger(__name__)
 
         # 加载.env配置
@@ -240,35 +261,66 @@ class DatabaseManager:
                 self.redis_available = False
     
     def get_mongodb_client(self):
-        """获取MongoDB客户端"""
+        """返回已初始化的 MongoDB 客户端实例。
+
+        Returns:
+            如果 MongoDB 可用且客户端已成功初始化，则返回 `pymongo.MongoClient`
+            实例；否则返回 None。
+        """
         if self.mongodb_available and self.mongodb_client:
             return self.mongodb_client
         return None
     
     def get_redis_client(self):
-        """获取Redis客户端"""
+        """返回已初始化的 Redis 客户端实例。
+
+        Returns:
+            如果 Redis 可用且客户端已成功初始化，则返回 `redis.Redis` 实例；
+            否则返回 None。
+        """
         if self.redis_available and self.redis_client:
             return self.redis_client
         return None
     
     def is_mongodb_available(self) -> bool:
-        """检查MongoDB是否可用"""
+        """检查 MongoDB 是否被检测为可用。
+
+        Returns:
+            如果 MongoDB 可用，则为 True；否则为 False。
+        """
         return self.mongodb_available
     
     def is_redis_available(self) -> bool:
-        """检查Redis是否可用"""
+        """检查 Redis 是否被检测为可用。
+
+        Returns:
+            如果 Redis 可用，则为 True；否则为 False。
+        """
         return self.redis_available
     
     def is_database_available(self) -> bool:
-        """检查是否有任何数据库可用"""
+        """检查是否有任何数据库（MongoDB 或 Redis）可用。
+
+        Returns:
+            如果至少有一个数据库可用，则为 True；否则为 False。
+        """
         return self.mongodb_available or self.redis_available
     
     def get_cache_backend(self) -> str:
-        """获取当前缓存后端"""
+        """获取当前被选为主要缓存后端的系统名称。
+
+        Returns:
+            一个字符串，值为 'redis'、'mongodb' 或 'file'。
+        """
         return self.primary_backend
 
     def get_config(self) -> Dict[str, Any]:
-        """获取配置信息"""
+        """返回包含当前数据库配置和状态的字典。
+
+        Returns:
+            一个包含 MongoDB 和 Redis 配置、可用性状态以及
+            主要后端信息的字典。
+        """
         return {
             "mongodb": self.mongodb_config,
             "redis": self.redis_config,
@@ -278,7 +330,12 @@ class DatabaseManager:
         }
 
     def get_status_report(self) -> Dict[str, Any]:
-        """获取状态报告"""
+        """生成并返回一份关于数据库连接状态的详细报告。
+
+        Returns:
+            一个包含各数据库可用性、连接信息和当前缓存后端等
+            信息的字典。
+        """
         return {
             "database_available": self.is_database_available(),
             "mongodb": {
@@ -296,7 +353,13 @@ class DatabaseManager:
         }
 
     def get_cache_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息"""
+        """获取缓存系统的统计信息，主要针对 Redis。
+
+        如果 Redis 可用，此方法将尝试获取其数据库中的键数量和内存使用情况。
+
+        Returns:
+            一个包含缓存统计信息的字典。
+        """
         stats = {
             "mongodb_available": self.mongodb_available,
             "redis_available": self.redis_available,
@@ -316,7 +379,16 @@ class DatabaseManager:
         return stats
 
     def cache_clear_pattern(self, pattern: str) -> int:
-        """清理匹配模式的缓存"""
+        """根据指定的模式字符串清理 Redis 缓存中的键。
+
+        此功能仅在 Redis 可用时生效。
+
+        Args:
+            pattern: 用于匹配键的模式，例如 'cache:prefix:*'。
+
+        Returns:
+            被成功删除的键的数量。
+        """
         cleared_count = 0
 
         if self.redis_available and self.redis_client:

@@ -16,9 +16,23 @@ import pandas as pd
 
 
 class ChineseFinanceDataAggregator:
-    """中国财经数据聚合器"""
+    """中国财经数据聚合器。
+
+    由于直接访问中国主流社交媒体（如微博）的API存在限制，此类旨在通过
+    聚合多个公开可用的财经数据源（如财经新闻、股票论坛等）来模拟对特定
+    股票的市场情绪分析。
+
+    注意：当前版本中的许多数据获取方法是基于模拟数据的，因为实际的网站
+    通常有严格的反爬虫措施。此类提供了一个可扩展的框架，未来可以接入
+    更可靠的数据源。
+
+    Attributes:
+        headers (dict): 用于模拟浏览器请求的HTTP头。
+        session (requests.Session): 用于发起HTTP请求的会话对象。
+    """
     
     def __init__(self):
+        """初始化聚合器，设置请求头和会话。"""
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
@@ -26,9 +40,18 @@ class ChineseFinanceDataAggregator:
         self.session.headers.update(self.headers)
     
     def get_stock_sentiment_summary(self, ticker: str, days: int = 7) -> Dict:
-        """
-        获取股票情绪分析汇总
-        整合多个可获取的中国财经数据源
+        """获取指定股票在中国的综合市场情绪摘要。
+
+        它会尝试从财经新闻、股票论坛和媒体报道等多个维度收集数据，
+        然后进行加权分析，得出一个综合的情绪评分和摘要。
+
+        Args:
+            ticker (str): 股票代码。
+            days (int, optional): 分析的时间窗口（天数）。默认为 7。
+
+        Returns:
+            Dict: 一个包含详细情绪分析结果的字典。如果获取失败，则
+                返回一个包含错误信息的字典。
         """
         try:
             # 1. 获取财经新闻情绪
@@ -65,7 +88,15 @@ class ChineseFinanceDataAggregator:
             }
     
     def _get_finance_news_sentiment(self, ticker: str, days: int) -> Dict:
-        """获取财经新闻情绪分析"""
+        """从公开财经新闻源中分析与特定股票相关的情绪。
+
+        Args:
+            ticker (str): 股票代码。
+            days (int): 分析的时间窗口。
+
+        Returns:
+            Dict: 包含情绪评分、正负面新闻比例和新闻总数的字典。
+        """
         try:
             # 搜索相关新闻标题和内容
             company_name = self._get_company_chinese_name(ticker)
@@ -110,7 +141,19 @@ class ChineseFinanceDataAggregator:
             return {'error': str(e), 'sentiment_score': 0, 'confidence': 0}
     
     def _get_stock_forum_sentiment(self, ticker: str, days: int) -> Dict:
-        """获取股票论坛讨论情绪 (模拟数据，实际需要爬虫)"""
+        """获取股票论坛（如东方财富股吧）的讨论情绪。
+
+        注意：这是一个模拟实现。由于主流股票论坛普遍存在严格的反爬虫
+        机制，实际数据获取需要复杂且不稳定的爬虫技术。因此，此方法当前
+        返回的是一个表示数据不可用的模拟结果。
+
+        Args:
+            ticker (str): 股票代码。
+            days (int): 分析的时间窗口。
+
+        Returns:
+            Dict: 一个包含提示信息的模拟数据字典。
+        """
         # 由于东方财富股吧等平台的反爬虫机制，这里返回模拟数据
         # 实际实现需要更复杂的爬虫技术
         
@@ -123,7 +166,18 @@ class ChineseFinanceDataAggregator:
         }
     
     def _get_media_coverage_sentiment(self, ticker: str, days: int) -> Dict:
-        """获取媒体报道情绪"""
+        """分析主流财经媒体对特定股票的报道情绪。
+
+        注意：这是一个模拟实现，当前返回空数据。实际应用中可接入
+        RSS源或第三方新闻API。
+
+        Args:
+            ticker (str): 股票代码。
+            days (int): 分析的时间窗口。
+
+        Returns:
+            Dict: 包含媒体报道情绪分析结果的字典。
+        """
         try:
             # 可以集成RSS源或公开的财经API
             coverage_items = self._get_media_coverage(ticker, days)
@@ -149,7 +203,15 @@ class ChineseFinanceDataAggregator:
             return {'error': str(e), 'sentiment_score': 0, 'confidence': 0}
     
     def _search_finance_news(self, search_term: str, days: int) -> List[Dict]:
-        """搜索财经新闻 (示例实现)"""
+        """搜索财经新闻的模拟实现。
+
+        Args:
+            search_term (str): 搜索关键词。
+            days (int): 时间窗口。
+
+        Returns:
+            List[Dict]: 一个包含模拟新闻条目的列表。
+        """
         # 这里可以集成多个新闻源的API或RSS
         # 例如：财联社、新浪财经、东方财富等
         
@@ -165,12 +227,27 @@ class ChineseFinanceDataAggregator:
         ]
     
     def _get_media_coverage(self, ticker: str, days: int) -> List[Dict]:
-        """获取媒体报道 (示例实现)"""
+        """获取媒体报道的模拟实现。
+
+        Args:
+            ticker (str): 股票代码。
+            days (int): 时间窗口。
+
+        Returns:
+            List[Dict]: 一个空的模拟媒体报道列表。
+        """
         # 可以集成Google News API或其他新闻聚合服务
         return []
     
     def _analyze_text_sentiment(self, text: str) -> float:
-        """简单的中文文本情绪分析"""
+        """一个基于关键词匹配的简单中文文本情绪分析器。
+
+        Args:
+            text (str): 需要分析的文本。
+
+        Returns:
+            float: 情绪评分，范围从 -1.0 (非常负面) 到 1.0 (非常正面)。
+        """
         if not text:
             return 0
         
@@ -187,7 +264,14 @@ class ChineseFinanceDataAggregator:
         return (positive_count - negative_count) / (positive_count + negative_count)
     
     def _get_company_chinese_name(self, ticker: str) -> Optional[str]:
-        """获取公司中文名称"""
+        """根据股票代码获取公司的中文名称（模拟）。
+
+        Args:
+            ticker (str): 股票代码。
+
+        Returns:
+            Optional[str]: 公司中文名，如果未找到则返回 None。
+        """
         # 简单的映射表，实际可以从数据库或API获取
         name_mapping = {
             'AAPL': '苹果',
@@ -200,7 +284,16 @@ class ChineseFinanceDataAggregator:
         return name_mapping.get(ticker.upper())
     
     def _calculate_overall_sentiment(self, news_sentiment: Dict, forum_sentiment: Dict, media_sentiment: Dict) -> Dict:
-        """计算综合情绪分析"""
+        """根据各数据源的置信度加权计算综合情绪。
+
+        Args:
+            news_sentiment (Dict): 新闻情绪分析结果。
+            forum_sentiment (Dict): 论坛情绪分析结果。
+            media_sentiment (Dict): 媒体情绪分析结果。
+
+        Returns:
+            Dict: 包含综合情绪评分、置信度和情绪等级的字典。
+        """
         # 根据各数据源的置信度加权计算
         news_weight = news_sentiment.get('confidence', 0)
         forum_weight = forum_sentiment.get('confidence', 0)
@@ -236,7 +329,14 @@ class ChineseFinanceDataAggregator:
         }
     
     def _generate_sentiment_summary(self, overall_sentiment: Dict) -> str:
-        """生成情绪分析摘要"""
+        """根据综合情绪分析结果生成一段人类可读的摘要文本。
+
+        Args:
+            overall_sentiment (Dict): 综合情绪分析结果。
+
+        Returns:
+            str: 格式化的摘要字符串。
+        """
         level = overall_sentiment.get('level', 'neutral')
         score = overall_sentiment.get('sentiment_score', 0)
         confidence = overall_sentiment.get('confidence', 0)
@@ -256,8 +356,17 @@ class ChineseFinanceDataAggregator:
 
 
 def get_chinese_social_sentiment(ticker: str, curr_date: str) -> str:
-    """
-    获取中国社交媒体情绪分析的主要接口函数
+    """获取并格式化中国市场对特定股票的情绪分析报告。
+
+    这是一个高级接口函数，它实例化聚合器，获取数据，并将其格式化为
+    一个人类可读的报告字符串。报告中会明确指出当前数据源的局限性。
+
+    Args:
+        ticker (str): 股票代码。
+        curr_date (str): 当前日期，用于报告标题。
+
+    Returns:
+        str: 格式化的情绪分析报告。
     """
     aggregator = ChineseFinanceDataAggregator()
     

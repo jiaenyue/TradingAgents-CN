@@ -9,23 +9,45 @@ logger = get_logger("graph.signal_processing")
 
 
 class SignalProcessor:
-    """Processes trading signals to extract actionable decisions."""
+    """
+    处理交易信号，以提取可操作的结构化决策信息。
+
+    该类使用语言模型（LLM）解析包含投资建议的文本，
+    并将其转换为包含操作（买入/卖出/持有）、目标价格、置信度等
+    关键信息的标准化字典格式。
+    """
 
     def __init__(self, quick_thinking_llm: ChatOpenAI):
-        """Initialize with an LLM for processing."""
+        """
+        初始化SignalProcessor。
+
+        Args:
+            quick_thinking_llm (ChatOpenAI): 用于处理和解析信号的语言模型。
+        """
         self.quick_thinking_llm = quick_thinking_llm
 
     @log_graph_module("signal_processing")
     def process_signal(self, full_signal: str, stock_symbol: str = None) -> dict:
         """
-        Process a full trading signal to extract structured decision information.
+        处理完整的交易信号，以提取结构化的决策信息。
+
+        该方法首先验证输入信号的有效性，然后根据股票代码确定市场和货币类型。
+        它构建一个包含详细指令的提示，并调用LLM来提取JSON格式的决策。
+        如果LLM调用失败或返回格式不正确，它会回退到简单的基于正则表达式的提取方法。
 
         Args:
-            full_signal: Complete trading signal text
-            stock_symbol: Stock symbol to determine currency type
+            full_signal (str): 完整的交易信号文本。
+            stock_symbol (str, optional): 股票代码，用于确定货币类型等上下文信息。默认为 None。
 
         Returns:
-            Dictionary containing extracted decision information
+            dict: 一个包含提取出的决策信息的字典，格式如下：
+                  {
+                      'action': '买入'/'持有'/'卖出',
+                      'target_price': float or None,
+                      'confidence': float,
+                      'risk_score': float,
+                      'reasoning': str
+                  }
         """
 
         # 验证输入参数
@@ -214,7 +236,20 @@ class SignalProcessor:
             return self._extract_simple_decision(full_signal)
 
     def _smart_price_estimation(self, text: str, action: str, is_china: bool) -> float:
-        """智能价格推算方法"""
+        """
+        智能价格推算方法。
+
+        当无法直接从文本中提取目标价格时，此方法会尝试根据上下文信息
+        （如当前价格、预期的涨跌幅）来估算一个合理的目标价。
+
+        Args:
+            text (str): 用于分析的完整文本。
+            action (str): 当前的投资动作（'买入', '卖出', '持有'）。
+            is_china (bool): 是否为中国A股市场，用于应用不同的默认估算乘数。
+
+        Returns:
+            float: 估算出的目标价格，如果无法估算则返回 None。
+        """
         import re
         
         # 尝试从文本中提取当前价格和涨跌幅信息
@@ -279,7 +314,18 @@ class SignalProcessor:
         return None
 
     def _extract_simple_decision(self, text: str) -> dict:
-        """简单的决策提取方法作为备用"""
+        """
+        简单的决策提取方法，作为备用方案。
+
+        当主流程（基于LLM的JSON解析）失败时，此方法使用正则表达式
+        从文本中提取关键信息（如操作和目标价格）。
+
+        Args:
+            text (str): 要从中提取决策的文本。
+
+        Returns:
+            dict: 一个包含提取出的决策信息的字典，结构与 `process_signal` 方法相同。
+        """
         import re
 
         # 提取动作
@@ -326,7 +372,14 @@ class SignalProcessor:
         }
 
     def _get_default_decision(self) -> dict:
-        """返回默认的投资决策"""
+        """
+        返回一个默认的、中性的投资决策。
+
+        在输入无效或处理过程中发生无法恢复的错误时调用此方法。
+
+        Returns:
+            dict: 一个表示“持有”的默认决策字典。
+        """
         return {
             'action': '持有',
             'target_price': None,

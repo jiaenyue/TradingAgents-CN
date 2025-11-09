@@ -1,6 +1,13 @@
 """
-阿里百炼大模型 (DashScope) 适配器
-为 TradingAgents 提供阿里百炼大模型的 LangChain 兼容接口
+阿里百炼大模型 (DashScope) 适配器模块。
+
+该模块为阿里巴巴的 DashScope (通义千问) 系列模型提供了一个与 LangChain 兼容的
+`BaseChatModel` 接口。它处理与 DashScope API 的通信、消息格式转换、
+API 密钥管理以及 token 使用量的跟踪。
+
+注意：这个基础适配器不直接支持 DashScope 的原生工具调用 (Function Calling)，
+工具的绑定和处理需要在应用层面实现。如需原生工具调用支持，请使用
+`dashscope_openai_adapter.py` 中提供的 OpenAI 兼容适配器。
 """
 
 import os
@@ -24,7 +31,33 @@ logger = get_logger('agents')
 
 
 class ChatDashScope(BaseChatModel):
-    """阿里百炼大模型的 LangChain 适配器"""
+    """
+    一个与 LangChain 兼容的阿里百炼 (DashScope) 大模型聊天适配器。
+
+    该类继承自 `BaseChatModel`，实现了与 DashScope API 交互所需的核心方法。
+    它负责将 LangChain 的消息格式转换为 DashScope API 所需的格式，并解析
+    API 的响应。
+
+    **主要功能:**
+    - 通过 `_generate` 方法与 DashScope API 进行同步通信。
+    - 通过 `_convert_messages_to_dashscope_format` 处理消息格式转换。
+    - 从环境变量或构造函数参数中自动管理 `DASHSCOPE_API_KEY`。
+    - 使用 `token_tracker` 记录每次调用的 token 使用情况。
+    - 提供一个 `bind_tools` 方法的存根，但实际的工具调用需要应用层逻辑支持。
+
+    **使用示例:**
+    ```python
+    from tradingagents.llm_adapters.dashscope_adapter import ChatDashScope
+    from langchain_core.messages import HumanMessage
+
+    # 初始化模型
+    llm = ChatDashScope(model="qwen-plus")
+
+    # 发送消息
+    response = llm.invoke([HumanMessage(content="你好，通义千问！")])
+    print(response.content)
+    ```
+    """
     
     # 模型配置
     model: str = Field(default="qwen-turbo", description="DashScope 模型名称")
@@ -37,7 +70,19 @@ class ChatDashScope(BaseChatModel):
     _client: Any = None
     
     def __init__(self, **kwargs):
-        """初始化 DashScope 客户端"""
+        """
+        初始化 `ChatDashScope` 实例。
+
+        此构造函数会设置 DashScope 的 API 密钥。密钥的来源优先级为：
+        1. 构造函数中传入的 `api_key` 参数。
+        2. 环境变量 `DASHSCOPE_API_KEY`。
+
+        Args:
+            **kwargs: 传递给 `pydantic.BaseModel` 的关键字参数。
+
+        Raises:
+            ValueError: 如果 API 密钥既没有在参数中提供，也没有在环境变量中设置。
+        """
         super().__init__(**kwargs)
         
         # 设置API密钥
@@ -59,11 +104,22 @@ class ChatDashScope(BaseChatModel):
     
     @property
     def _llm_type(self) -> str:
-        """返回LLM类型"""
+        """返回一个标识 LLM 类型的字符串。"""
         return "dashscope"
     
     def _convert_messages_to_dashscope_format(self, messages: List[BaseMessage]) -> List[Dict[str, str]]:
-        """将 LangChain 消息格式转换为 DashScope 格式"""
+        """
+        将 LangChain 的 `BaseMessage` 对象列表转换为 DashScope API 所需的字典列表格式。
+
+        该方法会处理不同类型的消息（System, Human, AI），并将它们映射到
+        DashScope API 对应的角色（"system", "user", "assistant"）。
+
+        Args:
+            messages (List[BaseMessage]): 要转换的 LangChain 消息列表。
+
+        Returns:
+            List[Dict[str, str]]: 一个符合 DashScope API 格式的字典列表。
+        """
         dashscope_messages = []
         
         for message in messages:
@@ -100,7 +156,29 @@ class ChatDashScope(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """生成聊天回复"""
+        """
+        通过调用 DashScope API 生成聊天回复（同步模式）。
+
+        这是实现 `BaseChatModel` 所必需的核心方法。它执行以下步骤：
+        1. 将 LangChain 消息转换为 DashScope 格式。
+        2. 构建 API 请求参数，包括模型名称、温度等。
+        3. 调用 `dashscope.Generation.call` 方法发送请求。
+        4. 解析 API 响应，提取生成的内容和 token 使用量。
+        5. 使用 `token_tracker` 记录 token 消耗。
+        6. 将结果封装在 `ChatResult` 对象中返回。
+
+        Args:
+            messages (List[BaseMessage]): 用于生成回复的聊天消息列表。
+            stop (Optional[List[str]], optional): 停止生成的字符串列表。
+            run_manager (Optional[CallbackManagerForLLMRun], optional): LangChain 的回调管理器。
+            **kwargs (Any): 其他传递给 DashScope API 的参数。
+
+        Returns:
+            ChatResult: 包含生成结果的 `ChatResult` 对象。
+
+        Raises:
+            Exception: 如果 API 调用失败或返回非 200 状态码。
+        """
         
         # 转换消息格式
         dashscope_messages = self._convert_messages_to_dashscope_format(messages)
@@ -191,16 +269,46 @@ class ChatDashScope(BaseChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """异步生成聊天回复"""
+        """
+        通过调用 DashScope API 生成聊天回复（异步模式）。
+
+        注意：当前实现为了简单起见，直接调用了同步的 `_generate` 方法。
+        在需要高并发 I/O 的场景下，应将其替换为真正的异步实现（例如，使用 `aiohttp`）。
+
+        Args:
+            messages (List[BaseMessage]): 用于生成回复的聊天消息列表。
+            stop (Optional[List[str]], optional): 停止生成的字符串列表。
+            run_manager (Optional[AsyncCallbackManagerForLLMRun], optional): LangChain 的异步回调管理器。
+            **kwargs (Any): 其他传递给 DashScope API 的参数。
+
+        Returns:
+            ChatResult: 包含生成结果的 `ChatResult` 对象。
+        """
         # 目前使用同步方法，后续可以实现真正的异步
-        return self._generate(messages, stop, run_manager, **kwargs)
+        return self._generate(messages, stop, None, **kwargs)
     
     def bind_tools(
         self,
         tools: Sequence[Union[Dict[str, Any], type, BaseTool]],
         **kwargs: Any,
     ) -> "ChatDashScope":
-        """绑定工具到模型"""
+        """
+        将工具“绑定”到模型。
+
+        重要提示：此版本的 `ChatDashScope` 适配器不直接支持 DashScope API 的原生
+        工具调用 (Function Calling)。此方法仅将工具信息存储在模型实例上，
+        但不会在 API 调用中实际使用它们。工具调用的逻辑需要由应用层代码
+        （例如，通过特定的提示工程）来处理。
+
+        如需原生工具调用支持，请使用 `ChatDashScopeOpenAI` 适配器。
+
+        Args:
+            tools (Sequence[Union[Dict[str, Any], type, BaseTool]]): 要绑定的工具序列。
+            **kwargs (Any): 额外的关键字参数。
+
+        Returns:
+            ChatDashScope: 一个新的 `ChatDashScope` 实例，其中包含了格式化的工具信息。
+        """
         # 注意：DashScope 目前不直接支持工具调用
         # 这里我们返回一个新的实例，但实际上工具调用需要在应用层处理
         formatted_tools = []
@@ -235,7 +343,14 @@ class ChatDashScope(BaseChatModel):
 
     @property
     def _identifying_params(self) -> Dict[str, Any]:
-        """返回标识参数"""
+        """
+        返回用于标识此 LLM 实例的唯一参数字典。
+
+        这些参数用于 LangChain 内部的缓存和识别机制。
+
+        Returns:
+            Dict[str, Any]: 包含模型名称和关键生成参数的字典。
+        """
         return {
             "model": self.model,
             "temperature": self.temperature,
@@ -271,7 +386,13 @@ DASHSCOPE_MODELS = {
 
 
 def get_available_models() -> Dict[str, Dict[str, Any]]:
-    """获取可用的 DashScope 模型列表"""
+    """
+    获取此适配器支持的可用 DashScope 模型及其元数据。
+
+    Returns:
+        Dict[str, Dict[str, Any]]: 一个字典，键是模型名称，值是包含
+                                  描述、上下文长度和推荐用途的元数据字典。
+    """
     return DASHSCOPE_MODELS
 
 
@@ -282,7 +403,19 @@ def create_dashscope_llm(
     max_tokens: int = 2000,
     **kwargs
 ) -> ChatDashScope:
-    """创建 DashScope LLM 实例的便捷函数"""
+    """
+    一个便捷的工厂函数，用于创建 `ChatDashScope` 实例。
+
+    Args:
+        model (str, optional): 模型名称。默认为 "qwen-plus"。
+        api_key (Optional[str], optional): DashScope API 密钥。默认为 None，将从环境变量读取。
+        temperature (float, optional): 温度参数。默认为 0.1。
+        max_tokens (int, optional): 最大生成 token 数。默认为 2000。
+        **kwargs: 其他传递给 `ChatDashScope` 构造函数的关键字参数。
+
+    Returns:
+        ChatDashScope: 一个 `ChatDashScope` 的新实例。
+    """
     
     return ChatDashScope(
         model=model,

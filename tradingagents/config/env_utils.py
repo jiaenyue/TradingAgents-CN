@@ -9,24 +9,18 @@ from typing import Any, Union, Optional
 
 
 def parse_bool_env(env_var: str, default: bool = False) -> bool:
-    """
-    解析布尔类型环境变量，兼容多种格式
-    
-    支持的格式：
-    - true/True/TRUE
-    - false/False/FALSE  
-    - 1/0
-    - yes/Yes/YES
-    - no/No/NO
-    - on/On/ON
-    - off/Off/OFF
-    
+    """健壮地将环境变量解析为布尔值。
+
+    此函数能够识别多种表示“真”或“假”的字符串，例如 'true', '1',
+    'yes', 'on' 等，不区分大小写。如果环境变量未设置，或者其值
+    无法被明确解析为布尔值，将返回指定的默认值。
+
     Args:
-        env_var: 环境变量名
-        default: 默认值
-        
+        env_var: 要解析的环境变量的名称。
+        default: 当环境变量未设置或无法解析时返回的默认布尔值。
+
     Returns:
-        bool: 解析后的布尔值
+        解析出的布尔值，或在无法解析时返回默认值。
     """
     value = os.getenv(env_var)
     
@@ -65,15 +59,16 @@ def parse_bool_env(env_var: str, default: bool = False) -> bool:
 
 
 def parse_int_env(env_var: str, default: int = 0) -> int:
-    """
-    解析整数类型环境变量
-    
+    """将环境变量解析为整数。
+
+    如果环境变量未设置或其值不是有效的整数格式，则返回默认值。
+
     Args:
-        env_var: 环境变量名
-        default: 默认值
-        
+        env_var: 要解析的环境变量的名称。
+        default: 当无法解析时返回的默认整数值。
+
     Returns:
-        int: 解析后的整数值
+        解析出的整数，或默认值。
     """
     value = os.getenv(env_var)
     
@@ -88,15 +83,16 @@ def parse_int_env(env_var: str, default: int = 0) -> int:
 
 
 def parse_float_env(env_var: str, default: float = 0.0) -> float:
-    """
-    解析浮点数类型环境变量
-    
+    """将环境变量解析为浮点数。
+
+    如果环境变量未设置或其值不是有效的浮点数格式，则返回默认值。
+
     Args:
-        env_var: 环境变量名
-        default: 默认值
-        
+        env_var: 要解析的环境变量的名称。
+        default: 当无法解析时返回的默认浮点数值。
+
     Returns:
-        float: 解析后的浮点数值
+        解析出的浮点数，或默认值。
     """
     value = os.getenv(env_var)
     
@@ -111,15 +107,16 @@ def parse_float_env(env_var: str, default: float = 0.0) -> float:
 
 
 def parse_str_env(env_var: str, default: str = "") -> str:
-    """
-    解析字符串类型环境变量
-    
+    """将环境变量解析为字符串，并去除首尾空白。
+
+    如果环境变量未设置，则返回默认值。
+
     Args:
-        env_var: 环境变量名
-        default: 默认值
-        
+        env_var: 要解析的环境变量的名称。
+        default: 当环境变量未设置时返回的默认字符串。
+
     Returns:
-        str: 解析后的字符串值
+        解析出的字符串，或默认值。
     """
     value = os.getenv(env_var)
     
@@ -130,16 +127,18 @@ def parse_str_env(env_var: str, default: str = "") -> str:
 
 
 def parse_list_env(env_var: str, separator: str = ",", default: Optional[list] = None) -> list:
-    """
-    解析列表类型环境变量
-    
+    """将环境变量解析为字符串列表。
+
+    该函数使用指定的分隔符将环境变量的值分割成一个列表，并清除
+    每个元素的首尾空白及过滤掉空字符串。
+
     Args:
-        env_var: 环境变量名
-        separator: 分隔符
-        default: 默认值
-        
+        env_var: 要解析的环境变量的名称。
+        separator: 用于分割字符串的分隔符，默认为逗号。
+        default: 当环境变量未设置时返回的默认列表。如果为 None，则默认为空列表。
+
     Returns:
-        list: 解析后的列表
+        解析出的字符串列表，或默认值。
     """
     if default is None:
         default = []
@@ -160,14 +159,14 @@ def parse_list_env(env_var: str, separator: str = ",", default: Optional[list] =
 
 
 def get_env_info(env_var: str) -> dict:
-    """
-    获取环境变量的详细信息
-    
+    """获取关于指定环境变量的详细元数据。
+
     Args:
-        env_var: 环境变量名
-        
+        env_var: 要查询的环境变量的名称。
+
     Returns:
-        dict: 环境变量信息
+        一个字典，包含环境变量的名称、值、是否存在、是否为空、
+        值的类型以及长度等信息。
     """
     value = os.getenv(env_var)
     
@@ -182,14 +181,15 @@ def get_env_info(env_var: str) -> dict:
 
 
 def validate_required_env_vars(required_vars: list) -> dict:
-    """
-    验证必需的环境变量是否已设置
-    
+    """检查一组必需的环境变量是否都已设置且不为空。
+
     Args:
-        required_vars: 必需的环境变量列表
-        
+        required_vars: 一个包含必需环境变量名称的字符串列表。
+
     Returns:
-        dict: 验证结果
+        一个包含验证结果的字典，其中包括一个总体的 `all_set` 标志，
+        以及 `missing`（未设置）、`empty`（值为空）和 `valid`（有效）
+        的变量列表。
     """
     results = {
         'all_set': True,

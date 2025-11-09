@@ -10,14 +10,30 @@ from .env_utils import parse_bool_env, parse_str_env, get_env_info, validate_req
 
 
 class TushareConfig:
-    """Tushare配置管理器"""
+    """专门用于管理 Tushare 数据接口相关配置的类。
+
+    该类负责从环境变量中加载、解析和验证 Tushare 的配置信息，
+    包括 API令牌、启用状态以及相关的缓存设置。它还提供了一系列
+    诊断工具，帮助开发者快速定位配置问题。
+
+    Attributes:
+        token (str): Tushare API 令牌。
+        enabled (bool): Tushare 数据源是否启用。
+        default_source (str): 默认的中国市场数据源。
+        cache_enabled (bool): 是否启用数据缓存。
+        cache_ttl_hours (str): 缓存的有效时间（小时）。
+    """
     
     def __init__(self):
-        """初始化Tushare配置"""
+        """初始化 TushareConfig 实例，并立即加载配置。"""
         self.load_config()
     
     def load_config(self):
-        """加载Tushare配置"""
+        """从环境变量中加载所有与 Tushare 相关的配置。
+
+        它会尝试使用 `python-dotenv` 加载 .env 文件，然后使用 `env_utils`
+        中的健壮解析函数来读取每个配置项。
+        """
         # 尝试加载python-dotenv
         try:
             from dotenv import load_dotenv
@@ -46,7 +62,15 @@ class TushareConfig:
         print(f"   ENABLE_DATA_CACHE: {self.cache_enabled}")
     
     def is_valid(self) -> bool:
-        """检查配置是否有效"""
+        """快速检查 Tushare 配置是否完整且有效。
+
+        有效配置需要满足以下条件：
+        1. `TUSHARE_ENABLED` 必须为 True。
+        2. `TUSHARE_TOKEN` 必须已设置且长度足够。
+
+        Returns:
+            如果配置有效，则返回 True；否则返回 False。
+        """
         if not self.enabled:
             return False
         
@@ -60,7 +84,14 @@ class TushareConfig:
         return True
     
     def get_validation_result(self) -> Dict[str, Any]:
-        """获取详细的验证结果"""
+        """提供一份详细的配置验证报告。
+
+        报告中包含了配置是否有效、各项配置的状态、发现的问题列表
+        以及对应的修复建议。
+
+        Returns:
+            一个包含详细验证信息的字典。
+        """
         result = {
             'valid': False,
             'enabled': self.enabled,
@@ -90,7 +121,12 @@ class TushareConfig:
         return result
     
     def get_env_debug_info(self) -> Dict[str, Any]:
-        """获取环境变量调试信息"""
+        """获取与 Tushare 相关的所有环境变量的详细调试信息。
+
+        Returns:
+            一个字典，键为环境变量名称，值为通过 `get_env_info`
+            获取的详细信息。
+        """
         env_vars = [
             "TUSHARE_TOKEN",
             "TUSHARE_ENABLED", 
@@ -105,7 +141,15 @@ class TushareConfig:
         return debug_info
     
     def test_boolean_parsing(self) -> Dict[str, Any]:
-        """测试布尔值解析的兼容性"""
+        """运行一系列测试用例，以验证布尔值环境变量解析的正确性和兼容性。
+
+        这有助于诊断因 Python 版本或环境差异导致的 `parse_bool_env`
+        行为异常问题。
+
+        Returns:
+            一个字典，其中包含了每个测试用例的输入值、期望结果、实际
+            解析结果以及测试是否通过。
+        """
         test_cases = [
             ("true", True),
             ("True", True), 
@@ -146,7 +190,14 @@ class TushareConfig:
         return results
     
     def fix_common_issues(self) -> Dict[str, str]:
-        """修复常见配置问题"""
+        """尝试识别并报告常见的配置错误。
+
+        例如，此方法可以检测到 `TUSHARE_ENABLED` 的值看起来是想设为
+        "true"，但由于某种原因被错误地解析为 False 的情况。
+
+        Returns:
+            一个字典，其中包含已识别的问题及其可能的修复建议。
+        """
         fixes = {}
         
         # 检查TUSHARE_ENABLED的常见问题

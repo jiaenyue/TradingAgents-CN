@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Tushare数据源工具类
-提供A股市场数据获取功能，包括实时行情、历史数据、财务数据等
+Tushare 数据源核心工具
+
+该模块提供了 `TushareProvider` 类, 它是与 Tushare Pro API 进行交互的核心。
+它负责处理 API 的初始化、连接、数据请求、缓存以及数据清洗 (如计算前复权价格)。
+该模块旨在为A股市场提供全面的数据获取功能, 包括股票列表、历史日线、
+基本信息和财务数据。
 """
 
 import os
@@ -38,15 +42,24 @@ except ImportError:
 
 
 class TushareProvider:
-    """Tushare数据提供器"""
+    """
+    Tushare 数据提供器。
+
+    作为与 Tushare Pro API 交互的主要接口, 负责处理所有数据请求。
+    它会自动管理 API Token, 并在启用时利用缓存系统来优化性能。
+    """
     
     def __init__(self, token: str = None, enable_cache: bool = True):
         """
-        初始化Tushare提供器
-        
+        初始化 Tushare 提供器。
+
+        此构造函数会从环境变量或参数中获取 Tushare API Token,
+        并建立与 Tushare Pro API 的连接。
+
         Args:
-            token: Tushare API token
-            enable_cache: 是否启用缓存
+            token (str, optional): Tushare API token。如果未提供,
+                                   将尝试从 `TUSHARE_TOKEN` 环境变量中读取。
+            enable_cache (bool): 是否启用缓存功能。
         """
         self.connected = False
         self.enable_cache = enable_cache and CACHE_AVAILABLE
@@ -90,10 +103,15 @@ class TushareProvider:
     
     def get_stock_list(self) -> pd.DataFrame:
         """
-        获取A股股票列表
-        
+        获取完整的A股上市股票列表。
+
+        数据会优先从24小时内的缓存中读取, 缓存未命中则通过API获取
+        并存入缓存。
+
         Returns:
-            DataFrame: 股票列表数据
+            pd.DataFrame: 包含所有A股股票基本信息的 DataFrame,
+                          列包括 'ts_code', 'symbol', 'name' 等。
+                          如果获取失败, 返回空的 DataFrame。
         """
         if not self.connected:
             logger.error(f"❌ Tushare未连接")
@@ -153,15 +171,21 @@ class TushareProvider:
     
     def get_stock_daily(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """
-        获取股票日线数据
-        
+        获取单个股票的历史日线行情数据 (前复权)。
+
+        该方法会自动处理股票代码格式, 并对获取到的原始数据进行前复权处理,
+        以消除因分红、配股等事件造成的股价突变, 生成连续的价格序列。
+
         Args:
-            symbol: 股票代码（如：000001.SZ）
-            start_date: 开始日期（YYYYMMDD）
-            end_date: 结束日期（YYYYMMDD）
+            symbol (str): 股票代码 (例如 '600519' 或 '000001.SZ')。
+            start_date (str, optional): 开始日期 ('YYYY-MM-DD' 或 'YYYYMMDD')。
+                                        默认为一年前。
+            end_date (str, optional): 结束日期 ('YYYY-MM-DD' 或 'YYYYMMDD')。
+                                      默认为当前日期。
             
         Returns:
-            DataFrame: 日线数据
+            pd.DataFrame: 包含前复权价格的日线数据 DataFrame。如果失败,
+                          返回空的 DataFrame。
         """
         # 记录详细的调用信息
         logger.info(f"🔍 [Tushare详细日志] get_stock_daily 开始执行")
@@ -288,16 +312,19 @@ class TushareProvider:
 
     def _calculate_forward_adjusted_prices(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        基于pct_chg计算前复权价格
+        (内部方法) 基于 `pct_chg` (涨跌幅) 字段计算前复权价格。
 
-        Tushare的daily接口返回除权价格，在除权日会出现价格跳跃。
-        使用pct_chg（涨跌幅）重新计算连续的前复权价格，确保价格序列的连续性。
+        Tushare 的 `daily` 接口返回的是未复权的价格, 在分红、送股等事件
+        发生时, 价格会产生断层, 不利于技术分析。此方法使用每日的涨跌幅
+        从最新的价格开始向前反向推算, 从而生成一个连续的前复权价格序列。
 
         Args:
-            data: 包含除权价格和pct_chg的DataFrame
+            data (pd.DataFrame): 包含 'close' 和 'pct_chg' 列的原始日线数据,
+                                 且必须按日期升序排列。
 
         Returns:
-            DataFrame: 包含前复权价格的数据
+            pd.DataFrame: 一个新的 DataFrame, 其中的 'open', 'high', 'low',
+                          'close' 列已被替换为前复权价格。
         """
         if data.empty or 'pct_chg' not in data.columns:
             logger.warning("⚠️ 数据为空或缺少pct_chg列，无法计算前复权价格")
@@ -360,13 +387,14 @@ class TushareProvider:
     
     def get_stock_info(self, symbol: str) -> Dict:
         """
-        获取股票基本信息
-        
+        获取单个股票的基本信息, 如名称、地区、行业、上市日期等。
+
         Args:
-            symbol: 股票代码
+            symbol (str): 股票代码。
             
         Returns:
-            Dict: 股票基本信息
+            Dict: 包含股票基本信息的字典。如果获取失败, 返回一个
+                  包含默认值的字典。
         """
         if not self.connected:
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
@@ -408,14 +436,17 @@ class TushareProvider:
     
     def get_financial_data(self, symbol: str, period: str = "20231231") -> Dict:
         """
-        获取财务数据
-        
+        获取指定报告期的主要财务报表数据。
+
+        包括资产负债表、利润表和现金流量表的关键字段。
+
         Args:
-            symbol: 股票代码
-            period: 报告期（YYYYMMDD）
+            symbol (str): 股票代码。
+            period (str, optional): 报告期, 格式为 'YYYYMMDD'。默认为 "20231231"。
             
         Returns:
-            Dict: 财务数据
+            Dict: 包含三大财务报表数据的字典。如果获取失败, 返回空字典
+                  或部分空数据。
         """
         if not self.connected:
             return {}
@@ -469,13 +500,16 @@ class TushareProvider:
     
     def _normalize_symbol(self, symbol: str) -> str:
         """
-        标准化股票代码为Tushare格式
+        (内部辅助方法) 将各种格式的股票代码标准化为 Tushare 要求的格式。
+
+        例如: '600519' -> '600519.SH', '000001' -> '000001.SZ'。
+        如果代码已包含 '.', 则认为它已经是标准格式。
 
         Args:
-            symbol: 原始股票代码
+            symbol (str): 原始股票代码。
 
         Returns:
-            str: Tushare格式的股票代码
+            str: Tushare 格式的股票代码 (例如 'xxxxxx.SZ' 或 'xxxxxx.SH')。
         """
         # 添加详细的股票代码追踪日志
         logger.info(f"🔍 [股票代码追踪] _normalize_symbol 接收到的原始股票代码: '{symbol}' (类型: {type(symbol)})")
@@ -515,13 +549,16 @@ class TushareProvider:
     
     def search_stocks(self, keyword: str) -> pd.DataFrame:
         """
-        搜索股票
-        
+        在本地缓存的股票列表中根据关键词搜索股票。
+
+        此方法不直接调用 API, 而是利用 `get_stock_list` 获取的列表数据
+        进行本地筛选, 匹配股票代码或名称。
+
         Args:
-            keyword: 搜索关键词
+            keyword (str): 搜索关键词。
             
         Returns:
-            DataFrame: 搜索结果
+            pd.DataFrame: 包含匹配结果的 DataFrame。
         """
         try:
             stock_list = self.get_stock_list()
@@ -550,7 +587,15 @@ class TushareProvider:
 _tushare_provider = None
 
 def get_tushare_provider() -> TushareProvider:
-    """获取全局Tushare提供器实例"""
+    """
+    获取全局唯一的 TushareProvider 实例 (单例模式)。
+
+    确保在整个应用程序中只创建一个 TushareProvider, 从而避免
+    重复的 API 连接和资源浪费。
+
+    Returns:
+        TushareProvider: 全局 TushareProvider 实例。
+    """
     global _tushare_provider
     if _tushare_provider is None:
         _tushare_provider = TushareProvider()
@@ -559,15 +604,15 @@ def get_tushare_provider() -> TushareProvider:
 
 def get_china_stock_data_tushare(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
     """
-    获取中国股票数据的便捷函数（Tushare数据源）
-    
+    获取中国股票日线数据的便捷函数。
+
     Args:
-        symbol: 股票代码
-        start_date: 开始日期
-        end_date: 结束日期
+        symbol (str): 股票代码。
+        start_date (str, optional): 开始日期。
+        end_date (str, optional): 结束日期。
         
     Returns:
-        DataFrame: 股票数据
+        pd.DataFrame: 包含日线数据的 DataFrame。
     """
     provider = get_tushare_provider()
     return provider.get_stock_daily(symbol, start_date, end_date)
@@ -575,13 +620,13 @@ def get_china_stock_data_tushare(symbol: str, start_date: str = None, end_date: 
 
 def get_china_stock_info_tushare(symbol: str) -> Dict:
     """
-    获取中国股票信息的便捷函数（Tushare数据源）
+    获取中国股票基本信息的便捷函数。
     
     Args:
-        symbol: 股票代码
+        symbol (str): 股票代码。
         
     Returns:
-        Dict: 股票信息
+        Dict: 包含股票基本信息的字典。
     """
     provider = get_tushare_provider()
     return provider.get_stock_info(symbol)

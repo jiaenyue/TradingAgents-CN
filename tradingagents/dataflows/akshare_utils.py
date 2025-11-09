@@ -15,10 +15,24 @@ logger = get_logger('agents')
 warnings.filterwarnings('ignore')
 
 class AKShareProvider:
-    """AKShare数据提供器"""
+    """AKShare数据提供器。
+
+    封装了AKShare库的常用功能，提供一个统一、健壮的接口来获取
+    A股和港股的股票数据、基本信息及财务数据。它内置了超时管理、
+    自动重试和详细的日志记录，以提高数据获取的稳定性和可追溯性。
+
+    Attributes:
+        ak: AKShare库的模块实例。如果导入失败，则为None。
+        connected (bool): 指示AKShare库是否成功导入并初始化。
+    """
 
     def __init__(self):
-        """初始化AKShare提供器"""
+        """初始化AKShareProvider。
+
+        尝试导入 `akshare` 库，并配置全局的超时和重试策略，以增强
+        网络请求的稳定性。如果 `akshare` 未安装，会将 `connected`
+        状态置为 `False`。
+        """
         try:
             import akshare as ak
             self.ak = ak
@@ -34,7 +48,12 @@ class AKShareProvider:
             logger.error(f"❌ AKShare未安装")
 
     def _configure_timeout(self):
-        """配置AKShare的超时设置"""
+        """配置全局超时和重试策略。
+
+        通过修改 `socket` 的默认超时时间和配置 `requests` 的HTTP适配器，
+        为所有后续的AKShare网络请求提供更长的超时（60秒）和自动重试
+        机制（最多3次），以应对网络波动。
+        """
         try:
             import requests
             import socket
@@ -67,7 +86,19 @@ class AKShareProvider:
             logger.info(f"🔧 使用默认超时设置")
     
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[pd.DataFrame]:
-        """获取股票历史数据"""
+        """获取A股的日线历史行情数据。
+
+        Args:
+            symbol (str): 股票代码 (例如, '600519' 或 '000001.SZ')。
+            start_date (str, optional): 开始日期 (格式: 'YYYY-MM-DD')。
+                默认为 '20240101'。
+            end_date (str, optional): 结束日期 (格式: 'YYYY-MM-DD')。
+                默认为 '20241231'。
+
+        Returns:
+            Optional[pd.DataFrame]: 包含历史行情数据的DataFrame，如果获取
+                失败或未连接，则返回 None。
+        """
         if not self.connected:
             return None
         
@@ -94,7 +125,15 @@ class AKShareProvider:
             return None
     
     def get_stock_info(self, symbol: str) -> Dict[str, Any]:
-        """获取股票基本信息"""
+        """获取A股的基本信息，如股票名称。
+
+        Args:
+            symbol (str): 股票代码 (例如, '600519')。
+
+        Returns:
+            Dict[str, Any]: 包含股票代码、名称和数据来源的字典。如果
+                获取失败，会返回一个默认的字典结构。
+        """
         if not self.connected:
             return {}
         
@@ -117,16 +156,19 @@ class AKShareProvider:
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
 
     def get_hk_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[pd.DataFrame]:
-        """
-        获取港股历史数据
+        """获取港股的日线历史行情数据。
+
+        此方法包含一个60秒的线程超时，以防止AKShare接口长时间无响应。
+        同时，它会将返回的数据列名标准化，以保持与其他数据源的一致性。
 
         Args:
-            symbol: 港股代码 (如: 00700 或 0700.HK)
-            start_date: 开始日期 (YYYY-MM-DD)
-            end_date: 结束日期 (YYYY-MM-DD)
+            symbol (str): 港股代码 (例如, '00700' 或 '0700.HK')。
+            start_date (str, optional): 开始日期 ('YYYY-MM-DD')。
+            end_date (str, optional): 结束日期 ('YYYY-MM-DD')。
 
         Returns:
-            DataFrame: 港股历史数据
+            Optional[pd.DataFrame]: 包含港股历史数据的DataFrame，如果
+                失败则返回 None。
         """
         if not self.connected:
             logger.error(f"❌ AKShare未连接")
@@ -210,14 +252,15 @@ class AKShareProvider:
             return None
 
     def get_hk_stock_info(self, symbol: str) -> Dict[str, Any]:
-        """
-        获取港股基本信息
+        """获取港股的基本信息，如名称和最新价格。
+
+        通过查询实时行情数据来提取所需信息，并设置了60秒的超时保护。
 
         Args:
-            symbol: 港股代码
+            symbol (str): 港股代码。
 
         Returns:
-            Dict: 港股基本信息
+            Dict[str, Any]: 包含港股基本信息的字典。
         """
         if not self.connected:
             return {
@@ -304,14 +347,15 @@ class AKShareProvider:
             }
 
     def _normalize_hk_symbol_for_akshare(self, symbol: str) -> str:
-        """
-        标准化港股代码为AKShare格式
+        """将常见的港股代码格式标准化为AKShare所需的5位数字字符串。
+
+        例如: '0700.HK' -> '00700', '700' -> '00700'。
 
         Args:
-            symbol: 原始港股代码 (如: 0700.HK 或 700)
+            symbol (str): 原始港股代码。
 
         Returns:
-            str: AKShare格式的港股代码 (如: 00700)
+            str: 标准化后的5位数字代码。
         """
         if not symbol:
             return symbol
@@ -326,14 +370,19 @@ class AKShareProvider:
         return clean_symbol
 
     def get_financial_data(self, symbol: str) -> Dict[str, Any]:
-        """
-        获取股票财务数据
-        
+        """获取A股的综合财务数据。
+
+        此方法会尝试获取包括主要财务指标、资产负债表、利润表和
+        现金流量表在内的多个数据集。即使部分数据获取失败，它也
+        会继续尝试获取其他数据，并将成功获取的数据整合到一个字典中返回。
+
         Args:
-            symbol: 股票代码 (6位数字)
-            
+            symbol (str): 6位数字的A股代码。
+
         Returns:
-            Dict: 包含主要财务指标的财务数据
+            Dict[str, Any]: 一个字典，键为财务报表类型（如
+                'main_indicators', 'balance_sheet'），值为对应的
+                DataFrame。如果全部失败，则返回空字典。
         """
         if not self.connected:
             logger.error(f"❌ AKShare未连接，无法获取{symbol}财务数据")
@@ -409,22 +458,26 @@ class AKShareProvider:
             return {}
 
 def get_akshare_provider() -> AKShareProvider:
-    """获取AKShare提供器实例"""
+    """获取AKShareProvider的单例或新实例。
+
+    Returns:
+        AKShareProvider: AKShareProvider的实例。
+    """
     return AKShareProvider()
 
 
 # 便捷函数
 def get_hk_stock_data_akshare(symbol: str, start_date: str = None, end_date: str = None) -> str:
-    """
-    使用AKShare获取港股数据的便捷函数
+    """使用AKShare获取并格式化港股历史数据的便捷函数。
 
     Args:
-        symbol: 港股代码
-        start_date: 开始日期
-        end_date: 结束日期
+        symbol (str): 港股代码。
+        start_date (str, optional): 开始日期 ('YYYY-MM-DD')。
+        end_date (str, optional): 结束日期 ('YYYY-MM-DD')。
 
     Returns:
-        str: 格式化的港股数据
+        str: 格式化为人类可读字符串的港股数据报告，或在失败时
+            返回错误信息。
     """
     try:
         provider = get_akshare_provider()

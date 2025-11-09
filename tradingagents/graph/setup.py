@@ -17,7 +17,12 @@ logger = get_logger("default")
 
 
 class GraphSetup:
-    """Handles the setup and configuration of the agent graph."""
+    """
+    处理代理图的设置和配置。
+
+    这个类负责根据提供的组件（如LLMs、工具包、记忆）和配置
+    来构建和编译LangGraph工作流。
+    """
 
     def __init__(
         self,
@@ -34,7 +39,23 @@ class GraphSetup:
         config: Dict[str, Any] = None,
         react_llm = None,
     ):
-        """Initialize with required components."""
+        """
+        初始化GraphSetup。
+
+        Args:
+            quick_thinking_llm (ChatOpenAI): 用于快速决策和分析的语言模型。
+            deep_thinking_llm (ChatOpenAI): 用于深入思考和判断的语言模型。
+            toolkit (Toolkit): 提供给代理使用的工具集。
+            tool_nodes (Dict[str, ToolNode]): 图中使用的工具节点字典。
+            bull_memory: 牛市研究员的记忆对象。
+            bear_memory: 熊市研究员的记忆对象。
+            trader_memory: 交易员的记忆对象。
+            invest_judge_memory: 投资裁判的记忆对象。
+            risk_manager_memory: 风险经理的记忆对象。
+            conditional_logic (ConditionalLogic): 定义图中条件逻辑的对象。
+            config (Dict[str, Any], optional): 包含额外配置的字典。默认为 None。
+            react_llm (optional): 用于ReAct代理的语言模型。默认为 None。
+        """
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.toolkit = toolkit
@@ -51,14 +72,22 @@ class GraphSetup:
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
     ):
-        """Set up and compile the agent workflow graph.
+        """
+        设置并编译代理工作流图。
+
+        这个方法根据选择的分析师类型动态构建图的结构，
+        包括创建节点、添加边和定义条件逻辑。
 
         Args:
-            selected_analysts (list): List of analyst types to include. Options are:
-                - "market": Market analyst
-                - "social": Social media analyst
-                - "news": News analyst
-                - "fundamentals": Fundamentals analyst
+            selected_analysts (list): 要包含在图中的分析师类型列表。
+                可用选项: "market", "social", "news", "fundamentals"。
+                默认为包含所有四种分析师。
+
+        Returns:
+            CompiledGraph: 一个已编译的、可执行的LangGraph图。
+
+        Raises:
+            ValueError: 如果 `selected_analysts` 列表为空。
         """
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")

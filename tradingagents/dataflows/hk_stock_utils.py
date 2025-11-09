@@ -17,10 +17,22 @@ logger = get_logger('agents')
 
 
 class HKStockProvider:
-    """港股数据提供器"""
+    """港股数据提供器。
+
+    该类封装了 `yfinance` 库，专门用于获取港股的行情数据和基本信息。
+    为了提高数据获取的稳定性，它内置了请求速率控制、超时管理和自动
+    重试机制。
+
+    主要功能:
+    - 获取指定时间范围内的港股历史行情数据。
+    - 获取港股的公司基本信息。
+    - 获取港股的最新实时价格。
+    - 自动将常见的港股代码格式标准化为 `yfinance` 所需的格式。
+    - 将获取的数据格式化为人类可读的文本报告。
+    """
 
     def __init__(self):
-        """初始化港股数据提供器"""
+        """初始化港股数据提供器，并设置请求相关的参数。"""
         self.last_request_time = 0
         self.min_request_interval = 2.0  # 增加请求间隔到2秒
         self.timeout = 60  # 请求超时时间（增加到60秒）
@@ -30,7 +42,7 @@ class HKStockProvider:
         logger.info(f"🇭🇰 港股数据提供器初始化完成")
     
     def _wait_for_rate_limit(self):
-        """等待速率限制"""
+        """确保两次请求之间有足够的间隔，以避免触发服务器的速率限制。"""
         current_time = time.time()
         time_since_last_request = current_time - self.last_request_time
         
@@ -41,16 +53,21 @@ class HKStockProvider:
         self.last_request_time = time.time()
     
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[pd.DataFrame]:
-        """
-        获取港股历史数据
-        
+        """获取指定港股在给定时间范围内的历史行情数据。
+
+        此方法包含一个健壮的重试逻辑，能够处理临时的网络问题和服务器
+        的速率限制错误。
+
         Args:
-            symbol: 港股代码 (如: 0700.HK)
-            start_date: 开始日期 (YYYY-MM-DD)
-            end_date: 结束日期 (YYYY-MM-DD)
-            
+            symbol (str): 港股代码 (例如, '0700.HK' 或 '700')。
+            start_date (str, optional): 开始日期 (格式: YYYY-MM-DD)。
+                默认为一年前的今天。
+            end_date (str, optional): 结束日期 (格式: YYYY-MM-DD)。
+                默认为今天。
+
         Returns:
-            DataFrame: 股票历史数据
+            Optional[pd.DataFrame]: 包含历史行情数据的DataFrame。如果
+                多次尝试后仍无法获取数据，则返回 None。
         """
         try:
             # 标准化港股代码
@@ -111,14 +128,15 @@ class HKStockProvider:
             return None
     
     def get_stock_info(self, symbol: str) -> Dict[str, Any]:
-        """
-        获取港股基本信息
-        
+        """获取港股的公司基本信息。
+
         Args:
-            symbol: 港股代码
-            
+            symbol (str): 港股代码。
+
         Returns:
-            Dict: 股票基本信息
+            Dict[str, Any]: 包含公司名称、货币、交易所、市值等基本
+                信息的字典。如果获取失败，会返回一个包含错误信息的
+                默认字典。
         """
         try:
             symbol = self._normalize_hk_symbol(symbol)
@@ -162,14 +180,17 @@ class HKStockProvider:
             }
     
     def get_real_time_price(self, symbol: str) -> Optional[Dict]:
-        """
-        获取港股实时价格
-        
+        """获取港股的“实时”价格信息。
+
+        注意：此方法通过获取最近一天的数据来模拟实时价格，可能存在一定的
+        延迟。
+
         Args:
-            symbol: 港股代码
-            
+            symbol (str): 港股代码。
+
         Returns:
-            Dict: 实时价格信息
+            Optional[Dict]: 包含最新价格、开盘价、最高/最低价等信息
+                的字典。如果失败，则返回 None。
         """
         try:
             symbol = self._normalize_hk_symbol(symbol)
@@ -201,14 +222,14 @@ class HKStockProvider:
             return None
     
     def _normalize_hk_symbol(self, symbol: str) -> str:
-        """
-        标准化港股代码格式
-        
+        """将常见的港股代码格式（如 '700', '00700'）标准化为 `yfinance`
+        所接受的 'XXXXX.HK' 格式。
+
         Args:
-            symbol: 原始港股代码
-            
+            symbol (str): 原始港股代码。
+
         Returns:
-            str: 标准化后的港股代码
+            str: 标准化后的港股代码。
         """
         if not symbol:
             return symbol
@@ -231,17 +252,18 @@ class HKStockProvider:
         return symbol
 
     def format_stock_data(self, symbol: str, data: pd.DataFrame, start_date: str, end_date: str) -> str:
-        """
-        格式化港股数据为文本格式
-        
+        """将获取到的港股行情数据 DataFrame 格式化为一段人类可读的文本报告。
+
+        报告中包含了股票基本信息、价格统计和最近几个交易日的行情摘要。
+
         Args:
-            symbol: 股票代码
-            data: 股票数据DataFrame
-            start_date: 开始日期
-            end_date: 结束日期
-            
+            symbol (str): 股票代码。
+            data (pd.DataFrame): 包含历史行情数据的DataFrame。
+            start_date (str): 数据区间的开始日期。
+            end_date (str): 数据区间的结束日期。
+
         Returns:
-            str: 格式化的股票数据文本
+            str: 格式化后的文本报告。如果输入数据为空，则返回错误信息。
         """
         if data is None or data.empty:
             return f"❌ 无法获取港股 {symbol} 的数据"

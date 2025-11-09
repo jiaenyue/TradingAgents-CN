@@ -1,5 +1,12 @@
 """
-DeepSeek LLM适配器，支持Token使用统计
+DeepSeek LLM 适配器模块，增加了对 Token 使用量的精确统计和成本计算功能。
+
+该模块提供了一个 `ChatDeepSeek` 类，它继承自 `langchain_openai.ChatOpenAI`。
+这个适配器的核心特性是重写了 `_generate` 方法，以便在每次调用 DeepSeek API 后，
+能够捕获并记录详细的 token 使用信息（包括输入和输出 token 数），并根据预设的
+价格计算该次调用的成本。
+
+如果 API 响应中没有提供 token 使用量，该适配器还会回退到基于字符数的估算方法。
 """
 
 import os
@@ -30,9 +37,14 @@ except ImportError:
 
 class ChatDeepSeek(ChatOpenAI):
     """
-    DeepSeek聊天模型适配器，支持Token使用统计
-    
-    继承自ChatOpenAI，添加了Token使用量统计功能
+    一个为 DeepSeek 聊天模型定制的 LangChain 适配器，增加了详细的 Token 使用统计功能。
+
+    该类通过继承 `ChatOpenAI` 来利用其与 OpenAI 兼容 API 的交互能力。
+    其主要增强之处在于覆盖了 `_generate` 方法，以实现以下功能：
+    - **精确 Token 追踪:** 从 DeepSeek API 的响应中直接提取 `prompt_tokens` 和 `completion_tokens`。
+    - **成本计算:** 利用 `token_tracker` 服务，根据使用的模型和 token 数量计算 API 调用成本。
+    - **Token 估算:** 在 API 未返回 token 使用量时，提供一个基于字符数的备用估算方法。
+    - **详细日志:** 记录每一次调用的 token 使用量和计算出的成本。
     """
     
     def __init__(
@@ -45,15 +57,18 @@ class ChatDeepSeek(ChatOpenAI):
         **kwargs
     ):
         """
-        初始化DeepSeek适配器
-        
+        初始化 `ChatDeepSeek` 适配器。
+
         Args:
-            model: 模型名称，默认为deepseek-chat
-            api_key: API密钥，如果不提供则从环境变量DEEPSEEK_API_KEY获取
-            base_url: API基础URL
-            temperature: 温度参数
-            max_tokens: 最大token数
-            **kwargs: 其他参数
+            model (str, optional): 要使用的 DeepSeek 模型名称。默认为 "deepseek-chat"。
+            api_key (Optional[str], optional): DeepSeek API 密钥。如果为 None，将从环境变量 `DEEPSEEK_API_KEY` 读取。
+            base_url (str, optional): DeepSeek API 的基础 URL。默认为 "https://api.deepseek.com"。
+            temperature (float, optional): 控制生成文本的随机性。默认为 0.1。
+            max_tokens (Optional[int], optional): 生成的最大 token 数量。默认为 None (由模型决定)。
+            **kwargs: 其他传递给 `ChatOpenAI` 父类构造函数的关键字参数。
+
+        Raises:
+            ValueError: 如果 API 密钥既没有在参数中提供，也没有在环境变量中设置。
         """
         
         # 获取API密钥
@@ -82,7 +97,29 @@ class ChatDeepSeek(ChatOpenAI):
         **kwargs: Any,
     ) -> ChatResult:
         """
-        生成聊天响应，并记录token使用量
+        重写父类的 `_generate` 方法，以增加 token 使用量追踪和成本计算功能。
+
+        该方法的核心流程如下：
+        1. 调用父类 (`ChatOpenAI`) 的 `_generate` 方法来获取 LLM 的原始响应。
+        2. 尝试从 `llm_output` 中提取精确的 `token_usage` 信息。
+        3. 如果无法获取精确信息，则调用 `_estimate_input_tokens` 和 `_estimate_output_tokens`
+           方法进行估算。
+        4. 如果 `TOKEN_TRACKING_ENABLED` 为 True，则调用 `token_tracker.track_usage`
+           来记录使用量并计算成本。
+        5. 将成本信息和其他元数据通过日志系统记录下来。
+
+        Args:
+            messages (List[BaseMessage]): 用于生成回复的聊天消息列表。
+            stop (Optional[List[str]], optional): 停止生成的字符串列表。
+            run_manager (Optional[CallbackManagerForLLMRun], optional): LangChain 的回调管理器。
+            **kwargs (Any): 其他传递给 API 的参数。支持自定义的 `session_id` 和 `analysis_type`
+                             用于更精细的追踪。
+
+        Returns:
+            ChatResult: 从父类 `_generate` 方法返回的原始 `ChatResult` 对象。
+
+        Raises:
+            Exception: 如果 API 调用失败。
         """
 
         # 记录开始时间
@@ -161,13 +198,17 @@ class ChatDeepSeek(ChatOpenAI):
     
     def _estimate_input_tokens(self, messages: List[BaseMessage]) -> int:
         """
-        估算输入token数量
-        
+        估算输入消息列表的 token 数量。
+
+        这是一个备用方法，仅在无法从 API 响应中获取精确 token 数时使用。
+        它基于一个简单的启发式规则：计算所有消息内容的总字符数，然后
+        除以一个估算的系数（此处为 2 字符/token）。
+
         Args:
-            messages: 输入消息列表
-            
+            messages (List[BaseMessage]): 需要估算 token 数的输入消息列表。
+
         Returns:
-            估算的输入token数量
+            int: 估算出的输入 token 数量。
         """
         total_chars = 0
         for message in messages:
@@ -181,13 +222,17 @@ class ChatDeepSeek(ChatOpenAI):
     
     def _estimate_output_tokens(self, result: ChatResult) -> int:
         """
-        估算输出token数量
-        
+        估算输出结果的 token 数量。
+
+        这是一个备用方法，仅在无法从 API 响应中获取精确 token 数时使用。
+        它基于一个简单的启发式规则：计算 `ChatResult` 中所有生成内容的总字符数，
+        然后除以一个估算的系数（此处为 2 字符/token）。
+
         Args:
-            result: 聊天结果
-            
+            result (ChatResult): 包含了模型生成内容的 `ChatResult` 对象。
+
         Returns:
-            估算的输出token数量
+            int: 估算出的输出 token 数量。
         """
         total_chars = 0
         for generation in result.generations:
@@ -205,15 +250,19 @@ class ChatDeepSeek(ChatOpenAI):
         **kwargs: Any,
     ) -> AIMessage:
         """
-        调用模型生成响应
-        
+        调用模型以生成响应，并确保 token 追踪参数得以传递。
+
+        此方法重写了 LangChain 的标准 `invoke` 方法，以便在调用 `_generate` 之前
+        正确处理输入，并确保 `session_id` 和 `analysis_type` 等自定义的
+        追踪参数能够被传递下去。
+
         Args:
-            input: 输入消息
-            config: 配置参数
-            **kwargs: 其他参数（包括session_id和analysis_type）
-            
+            input (Union[str, List[BaseMessage]]): 输入的提示字符串或消息列表。
+            config (Optional[Dict], optional): LangChain 的运行时配置字典。
+            **kwargs (Any): 额外的关键字参数，可包含 `session_id` 和 `analysis_type`。
+
         Returns:
-            AI消息响应
+            AIMessage: 模型生成的 AI 消息响应。
         """
         
         # 处理输入
@@ -239,16 +288,16 @@ def create_deepseek_llm(
     **kwargs
 ) -> ChatDeepSeek:
     """
-    创建DeepSeek LLM实例的便捷函数
-    
+    一个便捷的工厂函数，用于创建 `ChatDeepSeek` 实例。
+
     Args:
-        model: 模型名称
-        temperature: 温度参数
-        max_tokens: 最大token数
-        **kwargs: 其他参数
-        
+        model (str, optional): 模型名称。默认为 "deepseek-chat"。
+        temperature (float, optional): 温度参数。默认为 0.1。
+        max_tokens (Optional[int], optional): 最大生成 token 数。默认为 None。
+        **kwargs: 其他传递给 `ChatDeepSeek` 构造函数的关键字参数。
+
     Returns:
-        ChatDeepSeek实例
+        ChatDeepSeek: 一个 `ChatDeepSeek` 的新实例。
     """
     return ChatDeepSeek(
         model=model,

@@ -1,3 +1,27 @@
+"""
+数据流接口模块。
+
+该模块是 `tradingagents` 系统中所有外部数据获取功能的统一入口点。
+它整合了来自不同数据源（如 Finnhub, Google News, Reddit, Yahoo Finance,
+Tushare, AKShare 等）的函数，为上层应用提供了一致的、标准化的接口。
+
+主要功能包括:
+- **新闻数据**: 从 Finnhub, Google News, Reddit 等多个来源获取公司新闻、
+  全球宏观新闻和社交媒体情绪。
+- **基本面数据**: 获取公司的财务报表（资产负债表、现金流量表、利润表）、
+  内部交易和情绪数据。
+- **行情数据**: 提供美股、港股和中国A股的历史行情数据。
+- **技术指标**: 基于 `stockstats` 库计算各种技术分析指标。
+- **多市场支持**: 通过统一接口自动识别股票市场（A股、港股、美股）并
+  调用相应的数据源。
+- **数据源管理**: 支持动态切换中国A股的数据源（如 Tushare, AKShare），
+  并提供故障备援机制。
+- **缓存机制**: 对部分API调用结果进行缓存，以提高性能和减少冗余请求。
+
+该模块的设计旨在将数据获取的复杂性与业务逻辑分离，使得策略研究员
+和交易代理（Agents）可以专注于数据分析和决策制定，而不必关心底层
+数据源的具体实现细节。
+"""
 from typing import Annotated, Dict
 import time
 import os
@@ -67,21 +91,25 @@ from .config import get_config, set_config, DATA_DIR
 def get_finnhub_news(
     ticker: Annotated[
         str,
-        "Search query of a company's, e.g. 'AAPL, TSM, etc.",
+        "公司的股票代码, 例如: 'AAPL', 'TSM' 等。",
     ],
-    curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "how many days to look back"],
-):
+    curr_date: Annotated[str, "当前日期, 格式为 yyyy-mm-dd。"],
+    look_back_days: Annotated[int, "从当前日期向前回溯的天数。"],
+) -> str:
     """
-    Retrieve news about a company within a time frame
+    在指定的时间范围内, 检索一家公司的相关新闻。
 
-    Args
-        ticker (str): ticker for the company you are interested in
-        start_date (str): Start date in yyyy-mm-dd format
-        end_date (str): End date in yyyy-mm-dd format
-    Returns
-        str: dataframe containing the news of the company in the time frame
+    该函数会从 `curr_date` 开始, 向前回溯 `look_back_days` 天,
+    并返回这段时间内与指定公司 `ticker` 相关的所有新闻。
 
+    Args:
+        ticker (str): 您感兴趣的公司股票代码。
+        curr_date (str): 当前日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int): 希望向前回溯查找新闻的天数。
+
+    Returns:
+        str: 一个包含公司在指定时间范围内新闻的格式化字符串。
+             如果找不到新闻, 则返回一条错误信息。
     """
 
     start_date = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -114,20 +142,28 @@ def get_finnhub_news(
 
 
 def get_finnhub_company_insider_sentiment(
-    ticker: Annotated[str, "ticker symbol for the company"],
+    ticker: Annotated[str, "公司的股票代码。"],
     curr_date: Annotated[
         str,
-        "current date of you are trading at, yyyy-mm-dd",
+        "您正在交易的当前日期, 格式为 yyyy-mm-dd。",
     ],
-    look_back_days: Annotated[int, "number of days to look back"],
-):
+    look_back_days: Annotated[int, "向前回溯的天数。"],
+) -> str:
     """
-    Retrieve insider sentiment about a company (retrieved from public SEC information) for the past 15 days
+    检索一家公司在过去一段时间内的内部人员情绪数据。
+
+    此数据来源于公开的SEC(美国证券交易委员会)信息。函数会从 `curr_date`
+    开始, 向前回溯 `look_back_days` 天, 并生成一份关于这段时间内
+    内部人员情绪的报告。
+
     Args:
-        ticker (str): ticker symbol of the company
-        curr_date (str): current date you are trading on, yyyy-mm-dd
+        ticker (str): 公司的股票代码。
+        curr_date (str): 您正在交易的当前日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int): 希望向前回溯的天数。
+
     Returns:
-        str: a report of the sentiment in the past 15 days starting at curr_date
+        str: 一份关于指定时间范围内内部人员情绪的报告。如果无数据,
+             则返回空字符串。
     """
 
     date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -155,20 +191,28 @@ def get_finnhub_company_insider_sentiment(
 
 
 def get_finnhub_company_insider_transactions(
-    ticker: Annotated[str, "ticker symbol"],
+    ticker: Annotated[str, "公司的股票代码。"],
     curr_date: Annotated[
         str,
-        "current date you are trading at, yyyy-mm-dd",
+        "您正在交易的当前日期, 格式为 yyyy-mm-dd。",
     ],
-    look_back_days: Annotated[int, "how many days to look back"],
-):
+    look_back_days: Annotated[int, "向前回溯的天数。"],
+) -> str:
     """
-    Retrieve insider transcaction information about a company (retrieved from public SEC information) for the past 15 days
+    检索一家公司在过去一段时间内的内部人员交易信息。
+
+    此数据来源于公开的SEC(美国证券交易委员会)信息。该函数会从 `curr_date`
+    开始, 向前回溯 `look_back_days` 天, 并生成一份关于此期间公司
+    内部人员交易活动的报告。
+
     Args:
-        ticker (str): ticker symbol of the company
-        curr_date (str): current date you are trading at, yyyy-mm-dd
+        ticker (str): 公司的股票代码。
+        curr_date (str): 您正在交易的当前日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int): 希望向前回溯的天数。
+
     Returns:
-        str: a report of the company's insider transaction/trading informtaion in the past 15 days
+        str: 一份关于公司内部人员在指定时间范围内交易信息的报告。
+             如果无数据, 则返回空字符串。
     """
 
     date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -197,13 +241,28 @@ def get_finnhub_company_insider_transactions(
 
 
 def get_simfin_balance_sheet(
-    ticker: Annotated[str, "ticker symbol"],
+    ticker: Annotated[str, "公司的股票代码。"],
     freq: Annotated[
         str,
-        "reporting frequency of the company's financial history: annual / quarterly",
+        "公司财务历史的报告频率: 'annual' (年度) 或 'quarterly' (季度)。",
     ],
-    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-):
+    curr_date: Annotated[str, "您正在交易的当前日期, 格式为 yyyy-mm-dd。"],
+) -> str:
+    """
+    获取公司最新的资产负债表。
+
+    该函数会根据指定的报告频率 (`freq`), 查找在 `curr_date` 或之前
+    发布的、与 `ticker` 相关的最新一份资产负债表。
+
+    Args:
+        ticker (str): 公司的股票代码。
+        freq (str): 报告频率, 可选值为 'annual' (年度) 或 'quarterly' (季度)。
+        curr_date (str): 当前日期, 用于确定可获取的最新报告。
+
+    Returns:
+        str: 包含最新资产负债表详细信息的格式化字符串。如果找不到
+             相关报告, 则返回空字符串。
+    """
     data_path = os.path.join(
         DATA_DIR,
         "fundamental_data",
@@ -244,13 +303,28 @@ def get_simfin_balance_sheet(
 
 
 def get_simfin_cashflow(
-    ticker: Annotated[str, "ticker symbol"],
+    ticker: Annotated[str, "公司的股票代码。"],
     freq: Annotated[
         str,
-        "reporting frequency of the company's financial history: annual / quarterly",
+        "公司财务历史的报告频率: 'annual' (年度) 或 'quarterly' (季度)。",
     ],
-    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-):
+    curr_date: Annotated[str, "您正在交易的当前日期, 格式为 yyyy-mm-dd。"],
+) -> str:
+    """
+    获取公司最新的现金流量表。
+
+    该函数会根据指定的报告频率 (`freq`), 查找在 `curr_date` 或之前
+    发布的、与 `ticker` 相关的最新一份现金流量表。
+
+    Args:
+        ticker (str): 公司的股票代码。
+        freq (str): 报告频率, 可选值为 'annual' (年度) 或 'quarterly' (季度)。
+        curr_date (str): 当前日期, 用于确定可获取的最新报告。
+
+    Returns:
+        str: 包含最新现金流量表详细信息的格式化字符串。如果找不到
+             相关报告, 则返回空字符串。
+    """
     data_path = os.path.join(
         DATA_DIR,
         "fundamental_data",
@@ -291,13 +365,28 @@ def get_simfin_cashflow(
 
 
 def get_simfin_income_statements(
-    ticker: Annotated[str, "ticker symbol"],
+    ticker: Annotated[str, "公司的股票代码。"],
     freq: Annotated[
         str,
-        "reporting frequency of the company's financial history: annual / quarterly",
+        "公司财务历史的报告频率: 'annual' (年度) 或 'quarterly' (季度)。",
     ],
-    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-):
+    curr_date: Annotated[str, "您正在交易的当前日期, 格式为 yyyy-mm-dd。"],
+) -> str:
+    """
+    获取公司最新的利润表。
+
+    该函数会根据指定的报告频率 (`freq`), 查找在 `curr_date` 或之前
+    发布的、与 `ticker` 相关的最新一份利润表。
+
+    Args:
+        ticker (str): 公司的股票代码。
+        freq (str): 报告频率, 可选值为 'annual' (年度) 或 'quarterly' (季度)。
+        curr_date (str): 当前日期, 用于确定可获取的最新报告。
+
+    Returns:
+        str: 包含最新利润表详细信息的格式化字符串。如果找不到
+             相关报告, 则返回空字符串。
+    """
     data_path = os.path.join(
         DATA_DIR,
         "fundamental_data",
@@ -338,10 +427,25 @@ def get_simfin_income_statements(
 
 
 def get_google_news(
-    query: Annotated[str, "Query to search with"],
-    curr_date: Annotated[str, "Curr date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "how many days to look back"] = 7,
+    query: Annotated[str, "用于搜索的查询语句。"],
+    curr_date: Annotated[str, "当前日期, 格式为 yyyy-mm-dd。"],
+    look_back_days: Annotated[int, "从当前日期向前回溯的天数。"] = 7,
 ) -> str:
+    """
+    使用 Google News 检相关的索新闻。
+
+    该函数会从 `curr_date` 开始, 向前回溯 `look_back_days` 天, 并返回
+    这段时间内与 `query` 相关的新闻。对于中国A股的查询, 函数会自动
+    添加中文关键词以优化搜索结果。
+
+    Args:
+        query (str): 搜索查询。
+        curr_date (str): 当前日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int, optional): 向前回溯的天数, 默认为 7。
+
+    Returns:
+        str: 包含相关新闻的格式化字符串。如果找不到新闻, 则返回空字符串。
+    """
     # 判断是否为A股查询
     is_china_stock = False
     if any(code in query for code in ['SH', 'SZ', 'XSHE', 'XSHG']) or query.isdigit() or (len(query) == 6 and query[:6].isdigit()):
@@ -388,17 +492,24 @@ def get_google_news(
 
 
 def get_reddit_global_news(
-    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "how many days to look back"],
-    max_limit_per_day: Annotated[int, "Maximum number of news per day"],
+    start_date: Annotated[str, "开始日期, 格式为 yyyy-mm-dd。"],
+    look_back_days: Annotated[int, "从开始日期向前回溯的天数。"],
+    max_limit_per_day: Annotated[int, "每天获取新闻的最大数量。"],
 ) -> str:
     """
-    Retrieve the latest top reddit news
+    从 Reddit 检索最新的全球热门新闻。
+
+    该函数会从 `start_date` 开始, 向前回溯 `look_back_days` 天, 并
+    收集这段时间内 'global_news' 类别下的热门帖子。
+
     Args:
-        start_date: Start date in yyyy-mm-dd format
-        end_date: End date in yyyy-mm-dd format
+        start_date (str): 开始日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int): 向前回溯的天数。
+        max_limit_per_day (int): 每日新闻的最大获取数量。
+
     Returns:
-        str: A formatted dataframe containing the latest news articles posts on reddit and meta information in these columns: "created_utc", "id", "title", "selftext", "score", "num_comments", "url"
+        str: 一个包含 Reddit 全球新闻帖子标题和内容的格式化字符串。
+             如果找不到新闻, 则返回空字符串。
     """
 
     start_date = datetime.strptime(start_date, "%Y-%m-%d")
@@ -440,19 +551,26 @@ def get_reddit_global_news(
 
 
 def get_reddit_company_news(
-    ticker: Annotated[str, "ticker symbol of the company"],
-    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "how many days to look back"],
-    max_limit_per_day: Annotated[int, "Maximum number of news per day"],
+    ticker: Annotated[str, "公司的股票代码。"],
+    start_date: Annotated[str, "开始日期, 格式为 yyyy-mm-dd。"],
+    look_back_days: Annotated[int, "从开始日期向前回溯的天数。"],
+    max_limit_per_day: Annotated[int, "每天获取新闻的最大数量。"],
 ) -> str:
     """
-    Retrieve the latest top reddit news
+    从 Reddit 检索与特定公司相关的最新热门新闻。
+
+    该函数会从 `start_date` 开始, 向前回溯 `look_back_days` 天, 并
+    收集这段时间内 'company_news' 类别下与 `ticker` 相关的热门帖子。
+
     Args:
-        ticker: ticker symbol of the company
-        start_date: Start date in yyyy-mm-dd format
-        end_date: End date in yyyy-mm-dd format
+        ticker (str): 公司的股票代码。
+        start_date (str): 开始日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int): 向前回溯的天数。
+        max_limit_per_day (int): 每日新闻的最大获取数量。
+
     Returns:
-        str: A formatted dataframe containing the latest news articles posts on reddit and meta information in these columns: "created_utc", "id", "title", "selftext", "score", "num_comments", "url"
+        str: 一个包含与公司相关的 Reddit 新闻帖子标题和内容的格式化
+             字符串。如果找不到新闻, 则返回空字符串。
     """
 
     start_date = datetime.strptime(start_date, "%Y-%m-%d")
@@ -499,14 +617,35 @@ def get_reddit_company_news(
 
 
 def get_stock_stats_indicators_window(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    indicator: Annotated[str, "technical indicator to get the analysis and report of"],
+    symbol: Annotated[str, "公司的股票代码。"],
+    indicator: Annotated[str, "要获取分析和报告的技术指标。"],
     curr_date: Annotated[
-        str, "The current trading date you are trading on, YYYY-mm-dd"
+        str, "您正在交易的当前日期, 格式为 YYYY-mm-dd。"
     ],
-    look_back_days: Annotated[int, "how many days to look back"],
-    online: Annotated[bool, "to fetch data online or offline"],
+    look_back_days: Annotated[int, "向前回溯的天数。"],
+    online: Annotated[bool, "是在线获取数据还是离线获取。"],
 ) -> str:
+    """
+    获取指定时间窗口内某一技术指标的数值序列。
+
+    该函数会从 `curr_date` 开始, 向前回溯 `look_back_days` 天,
+    并计算这段时间内每一天的 `indicator` 技术指标值。
+
+    Args:
+        symbol (str): 公司的股票代码。
+        indicator (str): 您感兴趣的技术指标 (例如 'rsi', 'macd')。
+        curr_date (str): 当前日期, 格式为 'YYYY-mm-dd'。
+        look_back_days (int): 向前回溯的天数。
+        online (bool): 是否在线获取最新数据。如果为 False, 则使用
+                       本地缓存数据。
+
+    Returns:
+        str: 包含指定时间窗口内每日技术指标值的格式化报告, 并附有该
+             指标的简要说明。
+
+    Raises:
+        ValueError: 如果指定的 `indicator` 不被支持。
+    """
 
     best_ind_params = {
         # Moving Averages
@@ -635,13 +774,25 @@ def get_stock_stats_indicators_window(
 
 
 def get_stockstats_indicator(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    indicator: Annotated[str, "technical indicator to get the analysis and report of"],
+    symbol: Annotated[str, "公司的股票代码。"],
+    indicator: Annotated[str, "要获取其分析报告的技术指标。"],
     curr_date: Annotated[
-        str, "The current trading date you are trading on, YYYY-mm-dd"
+        str, "您正在交易的当前日期, 格式为 YYYY-mm-dd。"
     ],
-    online: Annotated[bool, "to fetch data online or offline"],
+    online: Annotated[bool, "是在线获取数据还是离线获取。"],
 ) -> str:
+    """
+    获取单个交易日特定股票的技术指标值。
+
+    Args:
+        symbol (str): 公司的股票代码。
+        indicator (str): 您感兴趣的技术指标。
+        curr_date (str): 您正在交易的当前日期, 格式为 'YYYY-mm-dd'。
+        online (bool): 是否在线获取最新数据。
+
+    Returns:
+        str: 指定日期的技术指标计算结果。如果计算失败, 则返回空字符串。
+    """
 
     curr_date = datetime.strptime(curr_date, "%Y-%m-%d")
     curr_date = curr_date.strftime("%Y-%m-%d")
@@ -664,10 +815,25 @@ def get_stockstats_indicator(
 
 
 def get_YFin_data_window(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "how many days to look back"],
+    symbol: Annotated[str, "公司的股票代码。"],
+    curr_date: Annotated[str, "开始日期, 格式为 yyyy-mm-dd。"],
+    look_back_days: Annotated[int, "向前回溯的天数。"],
 ) -> str:
+    """
+    从本地数据文件中获取指定时间窗口内的原始市场数据。
+
+    该函数会从 `curr_date` 开始, 向前回溯 `look_back_days` 天, 并从
+    预先下载的 CSV 文件中检索这段时间内的所有市场数据 (开盘价,
+    收盘价, 最高价, 最低价, 成交量等)。
+
+    Args:
+        symbol (str): 公司的股票代码。
+        curr_date (str): 时间窗口的结束日期, 格式为 'yyyy-mm-dd'。
+        look_back_days (int): 向前回溯的天数。
+
+    Returns:
+        str: 包含指定时间窗口内原始市场数据的格式化字符串。
+    """
     # calculate past days
     date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
     before = date_obj - relativedelta(days=look_back_days)
@@ -705,10 +871,26 @@ def get_YFin_data_window(
 
 
 def get_YFin_data_online(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-):
+    symbol: Annotated[str, "公司的股票代码。"],
+    start_date: Annotated[str, "开始日期, 格式为 yyyy-mm-dd。"],
+    end_date: Annotated[str, "结束日期, 格式为 yyyy-mm-dd。"],
+) -> str:
+    """
+    在线从 Yahoo Finance 获取股票数据。
+
+    该函数会实时查询 Yahoo Finance API, 获取指定股票在给定日期范围内的
+    历史行情数据。
+
+    Args:
+        symbol (str): 公司的股票代码。
+        start_date (str): 开始日期, 格式为 'yyyy-mm-dd'。
+        end_date (str): 结束日期, 格式为 'yyyy-mm-dd'。
+
+    Returns:
+        str: 包含股票数据的 CSV 格式字符串, 开头附有摘要信息。
+             如果 `yfinance` 库不可用或找不到数据, 则返回相应的
+             提示信息。
+    """
     # 检查yfinance是否可用
     if not YF_AVAILABLE or yf is None:
         return "yfinance库不可用，无法获取美股数据"
@@ -750,10 +932,24 @@ def get_YFin_data_online(
 
 
 def get_YFin_data(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-) -> str:
+    symbol: Annotated[str, "公司的股票代码。"],
+    start_date: Annotated[str, "开始日期, 格式为 yyyy-mm-dd。"],
+    end_date: Annotated[str, "结束日期, 格式为 yyyy-mm-dd。"],
+) -> pd.DataFrame:
+    """
+    从本地数据文件中获取指定日期范围内的 Yahoo Finance 数据。
+
+    Args:
+        symbol (str): 公司的股票代码。
+        start_date (str): 开始日期, 格式为 'yyyy-mm-dd'。
+        end_date (str): 结束日期, 格式为 'yyyy-mm-dd'。
+
+    Returns:
+        pd.DataFrame: 一个包含指定日期范围内市场数据的 Pandas DataFrame。
+
+    Raises:
+        Exception: 如果 `end_date` 超出了本地数据文件的日期范围。
+    """
     # read in data
     data = pd.read_csv(
         os.path.join(
@@ -784,7 +980,20 @@ def get_YFin_data(
     return filtered_data
 
 
-def get_stock_news_openai(ticker, curr_date):
+def get_stock_news_openai(ticker: str, curr_date: str) -> str:
+    """
+    使用 OpenAI API 搜索社交媒体上关于特定股票的新闻和讨论。
+
+    该函数会构造一个查询, 请求 OpenAI 模型搜索从 `curr_date` 往前
+    7 天内, 社交媒体上关于 `ticker` 的讨论。
+
+    Args:
+        ticker (str): 公司的股票代码。
+        curr_date (str): 当前日期, 格式为 'yyyy-mm-dd'。
+
+    Returns:
+        str: OpenAI API 返回的包含新闻和讨论的文本内容。
+    """
     config = get_config()
     client = OpenAI(base_url=config["backend_url"])
 
@@ -819,7 +1028,19 @@ def get_stock_news_openai(ticker, curr_date):
     return response.output[1].content[0].text
 
 
-def get_global_news_openai(curr_date):
+def get_global_news_openai(curr_date: str) -> str:
+    """
+    使用 OpenAI API 搜索全球宏观经济新闻。
+
+    该函数会构造一个查询, 请求 OpenAI 模型搜索从 `curr_date` 往前
+    7 天内, 对交易有参考价值的全球或宏观经济新闻。
+
+    Args:
+        curr_date (str): 当前日期, 格式为 'yyyy-mm-dd'。
+
+    Returns:
+        str: OpenAI API 返回的包含新闻内容的文本。
+    """
     config = get_config()
     client = OpenAI(base_url=config["backend_url"])
 
@@ -854,14 +1075,22 @@ def get_global_news_openai(curr_date):
     return response.output[1].content[0].text
 
 
-def get_fundamentals_finnhub(ticker, curr_date):
+def get_fundamentals_finnhub(ticker: str, curr_date: str) -> str:
     """
-    使用Finnhub API获取股票基本面数据作为OpenAI的备选方案
+    使用 Finnhub API 获取股票基本面数据。
+
+    该函数作为 `get_fundamentals_openai` 的备选方案, 在 OpenAI API
+    不可用时被调用。它会从 Finnhub 获取公司的基本财务数据、公司概况
+    和收益历史, 并将其格式化为一份综合报告。
+
     Args:
-        ticker (str): 股票代码
-        curr_date (str): 当前日期，格式为yyyy-mm-dd
+        ticker (str): 股票代码。
+        curr_date (str): 当前日期, 格式为 'yyyy-mm-dd'。此参数主要用于
+                         保持接口一致性, Finnhub API 返回的是最新数据。
+
     Returns:
-        str: 格式化的基本面数据报告
+        str: 格式化的基本面数据报告。如果 API 调用失败或未配置 API 密钥,
+             则返回错误信息。
     """
     try:
         import finnhub
@@ -994,15 +1223,23 @@ def get_fundamentals_finnhub(ticker, curr_date):
         return f"Finnhub基本面数据获取失败: {str(e)}"
 
 
-def get_fundamentals_openai(ticker, curr_date):
+def get_fundamentals_openai(ticker: str, curr_date: str) -> str:
     """
-    获取股票基本面数据，优先使用OpenAI，失败时回退到Finnhub API
-    支持缓存机制以提高性能
+    获取股票基本面数据, 优先使用 OpenAI API, 失败时回退到 Finnhub API。
+
+    该函数首先尝试通过 OpenAI API, 利用其强大的自然语言处理和网络搜索
+    能力来获取和总结股票的基本面信息。如果 OpenAI API 调用失败 (例如,
+    未配置 API 密钥或服务不可用), 它会自动调用 `get_fundamentals_finnhub`
+    函数作为备用方案。
+
+    此函数支持缓存机制, 以提高重复查询的性能。
+
     Args:
-        ticker (str): 股票代码
-        curr_date (str): 当前日期，格式为yyyy-mm-dd
+        ticker (str): 股票代码。
+        curr_date (str): 当前日期, 格式为 'yyyy-mm-dd'。
+
     Returns:
-        str: 基本面数据报告
+        str: 包含基本面数据的分析报告。
     """
     try:
         from .cache_manager import get_cache
@@ -1085,21 +1322,23 @@ def get_fundamentals_openai(ticker, curr_date):
 # ==================== Tushare数据接口 ====================
 
 def get_china_stock_data_tushare(
-    ticker: Annotated[str, "中国股票代码，如：000001、600036等"],
-    start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
-    end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD"]
+    ticker: Annotated[str, "中国股票代码, 如 '000001', '600036' 等。"],
+    start_date: Annotated[str, "开始日期, 格式为 'YYYY-MM-DD'。"],
+    end_date: Annotated[str, "结束日期, 格式为 'YYYY-MM-DD'。"]
 ) -> str:
     """
-    使用Tushare获取中国A股历史数据
-    重定向到data_source_manager，避免循环调用
+    使用 Tushare 获取中国A股的历史行情数据。
+
+    这是一个包装函数, 它会将请求重定向到 `data_source_manager` 以避免
+    循环导入依赖。
 
     Args:
-        ticker: 股票代码
-        start_date: 开始日期
-        end_date: 结束日期
+        ticker (str): 股票代码。
+        start_date (str): 开始日期。
+        end_date (str): 结束日期。
 
     Returns:
-        str: 格式化的股票数据报告
+        str: 格式化的股票数据报告。如果获取失败, 则返回错误信息。
     """
     try:
         from .data_source_manager import get_data_source_manager
@@ -1119,17 +1358,19 @@ def get_china_stock_data_tushare(
 
 
 def search_china_stocks_tushare(
-    keyword: Annotated[str, "搜索关键词，可以是股票名称或代码"]
+    keyword: Annotated[str, "搜索关键词, 可以是股票名称或代码。"]
 ) -> str:
     """
-    使用Tushare搜索中国A股股票
-    重定向到data_source_manager，避免循环调用
+    使用 Tushare 搜索中国A股股票。
+
+    这是一个包装函数, 它会将请求重定向到 `data_source_manager` 以避免
+    循环导入依赖。
 
     Args:
-        keyword: 搜索关键词
+        keyword (str): 搜索关键词。
 
     Returns:
-        str: 搜索结果
+        str: 搜索结果列表。如果搜索失败, 则返回错误信息。
     """
     try:
         from .data_source_manager import get_data_source_manager
@@ -1146,17 +1387,19 @@ def search_china_stocks_tushare(
 
 
 def get_china_stock_fundamentals_tushare(
-    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+    ticker: Annotated[str, "中国股票代码, 如 '000001', '600036' 等。"]
 ) -> str:
     """
-    使用Tushare获取中国A股基本面数据
-    重定向到data_source_manager，避免循环调用
+    使用 Tushare 获取中国A股的基本面数据。
+
+    这是一个包装函数, 它会将请求重定向到 `data_source_manager` 以避免
+    循环导入依赖。
 
     Args:
-        ticker: 股票代码
+        ticker (str): 股票代码。
 
     Returns:
-        str: 基本面分析报告
+        str: 格式化的基本面分析报告。如果获取失败, 则返回错误信息。
     """
     try:
         from .data_source_manager import get_data_source_manager
@@ -1173,17 +1416,19 @@ def get_china_stock_fundamentals_tushare(
 
 
 def get_china_stock_info_tushare(
-    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+    ticker: Annotated[str, "中国股票代码, 如 '000001', '600036' 等。"]
 ) -> str:
     """
-    使用Tushare获取中国A股基本信息
-    重定向到data_source_manager，避免循环调用
+    使用 Tushare 获取中国A股的基本信息。
+
+    这是一个包装函数, 它会将请求重定向到 `data_source_manager` 以避免
+    循环导入依赖。
 
     Args:
-        ticker: 股票代码
+        ticker (str): 股票代码。
 
     Returns:
-        str: 股票基本信息
+        str: 包含股票基本信息的字符串。如果获取失败, 则返回错误信息。
     """
     try:
         from .data_source_manager import get_data_source_manager
@@ -1202,21 +1447,25 @@ def get_china_stock_info_tushare(
 # ==================== 统一数据源接口 ====================
 
 def get_china_stock_data_unified(
-    ticker: Annotated[str, "中国股票代码，如：000001、600036等"],
-    start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
-    end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD"]
+    ticker: Annotated[str, "中国股票代码, 如 '000001', '600036' 等。"],
+    start_date: Annotated[str, "开始日期, 格式为 'YYYY-MM-DD'。"],
+    end_date: Annotated[str, "结束日期, 格式为 'YYYY-MM-DD'。"]
 ) -> str:
     """
-    统一的中国A股数据获取接口
-    自动使用配置的数据源（默认Tushare），支持备用数据源
+    获取中国A股数据的统一接口。
+
+    该函数会自动使用 `data_source_manager` 中当前配置的数据源
+    (默认为 Tushare) 来获取数据。如果主数据源失败, 它支持自动
+    切换到备用数据源。
 
     Args:
-        ticker: 股票代码
-        start_date: 开始日期
-        end_date: 结束日期
+        ticker (str): 股票代码。
+        start_date (str): 开始日期。
+        end_date (str): 结束日期。
 
     Returns:
-        str: 格式化的股票数据报告
+        str: 格式化的股票数据报告。如果所有数据源都获取失败, 则返回
+             错误信息。
     """
     # 记录详细的输入参数
     logger.info(f"📊 [统一接口] 开始获取中国股票数据",
@@ -1288,17 +1537,19 @@ def get_china_stock_data_unified(
 
 
 def get_china_stock_info_unified(
-    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+    ticker: Annotated[str, "中国股票代码, 如 '000001', '600036' 等。"]
 ) -> str:
     """
-    统一的中国A股基本信息获取接口
-    自动使用配置的数据源（默认Tushare）
+    获取中国A股基本信息的统一接口。
+
+    该函数会自动使用 `data_source_manager` 中当前配置的数据源来获取
+    股票的基本信息 (如名称、地区、行业等)。
 
     Args:
-        ticker: 股票代码
+        ticker (str): 股票代码。
 
     Returns:
-        str: 股票基本信息
+        str: 格式化的股票基本信息。如果获取失败, 则返回错误信息。
     """
     try:
         from .data_source_manager import get_china_stock_info_unified
@@ -1326,16 +1577,16 @@ def get_china_stock_info_unified(
 
 
 def switch_china_data_source(
-    source: Annotated[str, "数据源名称：tushare, akshare, baostock"]
+    source: Annotated[str, "数据源名称: 'tushare', 'akshare', 'baostock'。"]
 ) -> str:
     """
-    切换中国股票数据源
+    切换用于获取中国股票数据的数据源。
 
     Args:
-        source: 数据源名称
+        source (str): 要切换到的数据源名称。
 
     Returns:
-        str: 切换结果
+        str: 报告切换成功或失败的消息。
     """
     try:
         from .data_source_manager import get_data_source_manager, ChinaDataSource
@@ -1365,10 +1616,10 @@ def switch_china_data_source(
 
 def get_current_china_data_source() -> str:
     """
-    获取当前中国股票数据源
+    获取当前配置的中国股票数据源信息。
 
     Returns:
-        str: 当前数据源信息
+        str: 包含当前数据源、可用数据源和默认数据源的信息。
     """
     try:
         from .data_source_manager import get_data_source_manager
@@ -1390,17 +1641,22 @@ def get_current_china_data_source() -> str:
 
 # ==================== 港股数据接口 ====================
 
-def get_hk_stock_data_unified(symbol: str, start_date: str = None, end_date: str = None) -> str:
+def get_hk_stock_data_unified(symbol: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
     """
-    获取港股数据的统一接口
+    获取港股历史行情数据的统一接口。
+
+    该函数会尝试使用多个备选数据源 (优先顺序: AKShare, Yahoo Finance,
+    Finnhub) 来获取港股数据, 以提高成功率。
 
     Args:
-        symbol: 港股代码 (如: 0700.HK)
-        start_date: 开始日期 (YYYY-MM-DD)
-        end_date: 结束日期 (YYYY-MM-DD)
+        symbol (str): 港股代码 (例如 '0700.HK')。
+        start_date (Optional[str], optional): 开始日期 (格式 'YYYY-MM-DD')。
+                                               如果为 None, 则默认为一年前。
+        end_date (Optional[str], optional): 结束日期 (格式 'YYYY-MM-DD')。
+                                             如果为 None, 则默认为今天。
 
     Returns:
-        str: 格式化的港股数据
+        str: 格式化的港股数据报告。如果所有数据源都失败, 则返回错误信息。
     """
     try:
         logger.info(f"🇭🇰 获取港股数据: {symbol}")
@@ -1451,15 +1707,19 @@ def get_hk_stock_data_unified(symbol: str, start_date: str = None, end_date: str
         return f"❌ 获取港股{symbol}数据失败: {e}"
 
 
-def get_hk_stock_info_unified(symbol: str) -> Dict:
+def get_hk_stock_info_unified(symbol: str) -> Dict[str, Any]:
     """
-    获取港股信息的统一接口
+    获取港股基本信息的统一接口。
+
+    该函数会尝试使用多个备选数据源 (优先顺序: AKShare, Yahoo Finance)
+    来获取港股的基本信息。
 
     Args:
-        symbol: 港股代码
+        symbol (str): 港股代码。
 
     Returns:
-        Dict: 港股信息
+        Dict[str, Any]: 一个包含港股信息的字典。如果所有数据源都失败,
+                        则返回一个包含默认值和错误信息的字典。
     """
     try:
         # 优先使用AKShare（国内数据源，港股支持更好）
@@ -1510,17 +1770,22 @@ def get_hk_stock_info_unified(symbol: str) -> Dict:
         }
 
 
-def get_stock_data_by_market(symbol: str, start_date: str = None, end_date: str = None) -> str:
+def get_stock_data_by_market(symbol: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
     """
-    根据股票市场类型自动选择数据源获取数据
+    根据股票市场类型自动选择相应的数据源来获取行情数据。
+
+    该函数首先利用 `StockUtils.get_market_info` 判断股票 `symbol`
+    所属的市场 (中国A股、港股或美股), 然后调用相应市场的统一数据
+    获取接口 (例如 `get_china_stock_data_unified`)。
 
     Args:
-        symbol: 股票代码
-        start_date: 开始日期
-        end_date: 结束日期
+        symbol (str): 股票代码。
+        start_date (Optional[str], optional): 开始日期 (格式 'YYYY-MM-DD')。
+        end_date (Optional[str], optional): 结束日期 (格式 'YYYY-MM-DD')。
 
     Returns:
-        str: 格式化的股票数据
+        str: 格式化的股票数据报告。如果市场类型判断失败或数据获取失败,
+             则返回错误信息。
     """
     try:
         from .utils.stock_utils import StockUtils

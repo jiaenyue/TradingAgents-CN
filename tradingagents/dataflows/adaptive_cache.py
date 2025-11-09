@@ -17,9 +17,29 @@ import pandas as pd
 from ..config.database_manager import get_database_manager
 
 class AdaptiveCacheSystem:
-    """自适应缓存系统"""
+    """自适应缓存系统。
+
+    根据数据库（Redis, MongoDB）的可用性动态选择最佳的缓存策略。
+    如果配置的主要后端（如Redis）不可用，它可以自动降级到备用后端
+    （如文件缓存），从而确保系统的健壮性和高性能。
+
+    Attributes:
+        logger: 日志记录器实例。
+        db_manager: 数据库管理器实例，用于访问Redis和MongoDB。
+        cache_dir (Path): 文件缓存的存储目录。
+        config (dict): 从数据库管理器加载的全局配置。
+        cache_config (dict): 缓存相关的特定配置。
+        primary_backend (str): 首选的主要缓存后端 ('redis', 'mongodb', 'file')。
+        fallback_enabled (bool): 是否启用降级到文件缓存的机制。
+    """
     
     def __init__(self, cache_dir: str = "data/cache"):
+        """初始化自适应缓存系统。
+
+        Args:
+            cache_dir (str, optional): 用于文件缓存的根目录。
+                默认为 "data/cache"。
+        """
         self.logger = logging.getLogger(__name__)
         
         # 获取数据库管理器
@@ -41,12 +61,34 @@ class AdaptiveCacheSystem:
     
     def _get_cache_key(self, symbol: str, start_date: str = "", end_date: str = "", 
                       data_source: str = "default", data_type: str = "stock_data") -> str:
-        """生成缓存键"""
+        """根据输入参数生成一个确定性的缓存键。
+
+        使用MD5哈希算法确保键的唯一性和固定长度。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str, optional): 数据开始日期。默认为 ""。
+            end_date (str, optional): 数据结束日期。默认为 ""。
+            data_source (str, optional): 数据来源。默认为 "default"。
+            data_type (str, optional): 数据类型 (例如, 'stock_data', 'news')。
+                默认为 "stock_data"。
+
+        Returns:
+            str: 生成的MD5缓存键。
+        """
         key_data = f"{symbol}_{start_date}_{end_date}_{data_source}_{data_type}"
         return hashlib.md5(key_data.encode()).hexdigest()
     
     def _get_ttl_seconds(self, symbol: str, data_type: str = "stock_data") -> int:
-        """获取TTL秒数"""
+        """根据市场和数据类型获取缓存的生存时间（TTL）。
+
+        Args:
+            symbol (str): 股票代码，用于判断市场（中国或美国）。
+            data_type (str, optional): 数据类型。默认为 "stock_data"。
+
+        Returns:
+            int: 缓存的有效时间（秒）。
+        """
         # 判断市场类型
         if len(symbol) == 6 and symbol.isdigit():
             market = "china"
@@ -59,7 +101,15 @@ class AdaptiveCacheSystem:
         return ttl_seconds
     
     def _is_cache_valid(self, cache_time: datetime, ttl_seconds: int) -> bool:
-        """检查缓存是否有效"""
+        """检查文件缓存是否在有效期内。
+
+        Args:
+            cache_time (datetime): 缓存的创建时间。
+            ttl_seconds (int): 缓存的有效秒数。
+
+        Returns:
+            bool: 如果缓存仍然有效，则返回 True，否则返回 False。
+        """
         if cache_time is None:
             return False
         
@@ -67,7 +117,16 @@ class AdaptiveCacheSystem:
         return datetime.now() < expiry_time
     
     def _save_to_file(self, cache_key: str, data: Any, metadata: Dict) -> bool:
-        """保存到文件缓存"""
+        """将数据和元数据以pickle格式保存到文件缓存。
+
+        Args:
+            cache_key (str): 缓存键。
+            data (Any): 要缓存的数据。
+            metadata (Dict): 数据的元信息。
+
+        Returns:
+            bool: 如果保存成功，返回 True，否则返回 False。
+        """
         try:
             cache_file = self.cache_dir / f"{cache_key}.pkl"
             cache_data = {
@@ -88,7 +147,15 @@ class AdaptiveCacheSystem:
             return False
     
     def _load_from_file(self, cache_key: str) -> Optional[Dict]:
-        """从文件缓存加载"""
+        """从文件缓存中加载pickle格式的数据。
+
+        Args:
+            cache_key (str): 缓存键。
+
+        Returns:
+            Optional[Dict]: 如果找到缓存文件，返回包含数据和元信息的字典，
+                否则返回 None。
+        """
         try:
             cache_file = self.cache_dir / f"{cache_key}.pkl"
             if not cache_file.exists():
@@ -105,7 +172,17 @@ class AdaptiveCacheSystem:
             return None
     
     def _save_to_redis(self, cache_key: str, data: Any, metadata: Dict, ttl_seconds: int) -> bool:
-        """保存到Redis缓存"""
+        """将数据序列化后保存到Redis，并设置TTL。
+
+        Args:
+            cache_key (str): 缓存键。
+            data (Any): 要缓存的数据。
+            metadata (Dict): 数据的元信息。
+            ttl_seconds (int): 在Redis中的生存时间（秒）。
+
+        Returns:
+            bool: 如果保存成功，返回 True，否则返回 False。
+        """
         redis_client = self.db_manager.get_redis_client()
         if not redis_client:
             return False
@@ -129,7 +206,15 @@ class AdaptiveCacheSystem:
             return False
     
     def _load_from_redis(self, cache_key: str) -> Optional[Dict]:
-        """从Redis缓存加载"""
+        """从Redis加载数据并反序列化。
+
+        Args:
+            cache_key (str): 缓存键。
+
+        Returns:
+            Optional[Dict]: 如果在Redis中找到数据，返回反序列化后的字典，
+                否则返回 None。
+        """
         redis_client = self.db_manager.get_redis_client()
         if not redis_client:
             return None
@@ -153,7 +238,20 @@ class AdaptiveCacheSystem:
             return None
     
     def _save_to_mongodb(self, cache_key: str, data: Any, metadata: Dict, ttl_seconds: int) -> bool:
-        """保存到MongoDB缓存"""
+        """将数据（特别是DataFrame）高效地保存到MongoDB。
+
+        对 pandas DataFrame 进行特殊处理，以JSON格式存储，其他类型
+        的数据则使用pickle序列化。
+
+        Args:
+            cache_key (str): 缓存键，用作MongoDB文档的 `_id`。
+            data (Any): 要缓存的数据。
+            metadata (Dict): 数据的元信息。
+            ttl_seconds (int): 用于计算 `expires_at` 字段，以支持TTL索引。
+
+        Returns:
+            bool: 如果保存成功，返回 True，否则返回 False。
+        """
         mongodb_client = self.db_manager.get_mongodb_client()
         if not mongodb_client:
             return False
@@ -190,7 +288,15 @@ class AdaptiveCacheSystem:
             return False
     
     def _load_from_mongodb(self, cache_key: str) -> Optional[Dict]:
-        """从MongoDB缓存加载"""
+        """从MongoDB加载数据，并根据存储类型进行反序列化。
+
+        Args:
+            cache_key (str): 缓存键 (文档的 `_id`)。
+
+        Returns:
+            Optional[Dict]: 如果找到并且文档未过期，返回包含数据和元信息
+                的字典，否则返回 None。
+        """
         mongodb_client = self.db_manager.get_mongodb_client()
         if not mongodb_client:
             return None
@@ -230,7 +336,21 @@ class AdaptiveCacheSystem:
     
     def save_data(self, symbol: str, data: Any, start_date: str = "", end_date: str = "", 
                   data_source: str = "default", data_type: str = "stock_data") -> str:
-        """保存数据到缓存"""
+        """将数据保存到配置的缓存后端。
+
+        如果主要后端保存失败且启用了降级，会自动尝试保存到文件缓存。
+
+        Args:
+            symbol (str): 股票代码。
+            data (Any): 要缓存的数据。
+            start_date (str, optional): 数据开始日期。默认为 ""。
+            end_date (str, optional): 数据结束日期。默认为 ""。
+            data_source (str, optional): 数据来源。默认为 "default"。
+            data_type (str, optional): 数据类型。默认为 "stock_data"。
+
+        Returns:
+            str: 生成并用于保存数据的缓存键。
+        """
         # 生成缓存键
         cache_key = self._get_cache_key(symbol, start_date, end_date, data_source, data_type)
         
@@ -269,7 +389,17 @@ class AdaptiveCacheSystem:
         return cache_key
     
     def load_data(self, cache_key: str) -> Optional[Any]:
-        """从缓存加载数据"""
+        """根据配置的策略从缓存中加载数据。
+
+        如果从主要后端加载失败且启用了降级，会自动尝试从文件缓存加载。
+
+        Args:
+            cache_key (str): 要加载的数据的缓存键。
+
+        Returns:
+            Optional[Any]: 如果找到有效的缓存数据，则返回数据本身，
+                否则返回 None。
+        """
         cache_data = None
         
         # 根据主要后端加载
@@ -302,7 +432,19 @@ class AdaptiveCacheSystem:
     
     def find_cached_data(self, symbol: str, start_date: str = "", end_date: str = "", 
                         data_source: str = "default", data_type: str = "stock_data") -> Optional[str]:
-        """查找缓存的数据"""
+        """查找是否存在给定参数的有效缓存数据。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str, optional): 数据开始日期。默认为 ""。
+            end_date (str, optional): 数据结束日期。默认为 ""。
+            data_source (str, optional): 数据来源。默认为 "default"。
+            data_type (str, optional): 数据类型。默认为 "stock_data"。
+
+        Returns:
+            Optional[str]: 如果找到有效的缓存数据，返回其缓存键，
+                否则返回 None。
+        """
         cache_key = self._get_cache_key(symbol, start_date, end_date, data_source, data_type)
         
         # 检查缓存是否存在且有效
@@ -312,7 +454,14 @@ class AdaptiveCacheSystem:
         return None
     
     def get_cache_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息"""
+        """获取并返回缓存系统的综合统计信息。
+
+        包括后端配置、数据库可用性、以及各个缓存后端的具体统计
+        （如键数量、内存使用等）。
+
+        Returns:
+            Dict[str, Any]: 包含缓存统计信息的字典。
+        """
         stats = {
             'primary_backend': self.primary_backend,
             'fallback_enabled': self.fallback_enabled,
@@ -345,7 +494,11 @@ class AdaptiveCacheSystem:
         return stats
     
     def clear_expired_cache(self):
-        """清理过期缓存"""
+        """手动清理文件缓存中的过期数据。
+
+        注意：Redis和MongoDB有自己的自动过期机制，此方法主要
+        用于维护文件缓存。
+        """
         self.logger.info("开始清理过期缓存...")
         
         # 清理文件缓存
@@ -376,7 +529,11 @@ class AdaptiveCacheSystem:
 _cache_system = None
 
 def get_cache_system() -> AdaptiveCacheSystem:
-    """获取全局自适应缓存系统实例"""
+    """获取全局唯一的自适应缓存系统实例（Singleton模式）。
+
+    Returns:
+        AdaptiveCacheSystem: 缓存系统的单例。
+    """
     global _cache_system
     if _cache_system is None:
         _cache_system = AdaptiveCacheSystem()

@@ -75,9 +75,40 @@ def _get_company_name_for_china_market(ticker: str, market_info: dict) -> str:
 
 
 def create_china_market_analyst(llm, toolkit):
-    """创建中国市场分析师"""
+    """创建一个专门分析中国市场的分析师节点。
+
+    该函数返回一个 LangChain 计算图节点，该节点封装了中国市场分析师的逻辑。
+    分析师利用大型语言模型（LLM）和一套工具来分析中国A股、港股等市场，
+    并生成一份详细的分析报告。
+
+    Args:
+        llm: 用于生成分析报告的大型语言模型实例。
+        toolkit: 包含分析师所需工具的对象，例如获取股票数据、市场概览等。
+
+    Returns:
+        一个可用于 LangChain 计算图的函数（节点），该函数接收状态字典
+        并返回包含分析结果的更新状态。
+    """
     
     def china_market_analyst_node(state):
+        """LangChain 计算图中的一个节点，代表中国市场分析师的工作流程。
+
+        该节点执行以下操作：
+        1. 从输入状态中提取当前交易日期和目标公司股票代码。
+        2. 获取股票的市场信息（A股、港股、美股等）。
+        3. 根据市场信息获取公司中文名称。
+        4. 配置并调用大型语言模型（LLM）进行分析，并提供相关工具。
+        5. 处理模型的工具调用请求，并生成最终的分析报告。
+        6. 将报告和发送者信息添加到状态中，以便工作流中的其他部分使用。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 和
+                          'company_of_interest' 键。
+
+        Returns:
+            dict: 一个包含新消息、中国市场分析报告和发送者标识的字典，
+                  用于更新计算图的状态。
+        """
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         
@@ -196,9 +227,34 @@ def create_china_market_analyst(llm, toolkit):
 
 
 def create_china_stock_screener(llm, toolkit):
-    """创建中国股票筛选器"""
+    """创建一个中国股票筛选器节点。
+
+    此函数构造并返回一个用于 LangChain 计算图的节点，该节点能够根据多种维度
+    （基本面、技术面、市场面、政策面）筛选中国A股市场的股票。
+
+    Args:
+        llm: 用于执行筛选逻辑的大型语言模型实例。
+        toolkit: 提供市场数据和分析工具的工具包。
+
+    Returns:
+        一个可用于 LangChain 计算图的函数（节点），它接收当前状态并返回
+        包含股票筛选建议的更新状态。
+    """
     
     def china_stock_screener_node(state):
+        """LangChain 计算图中的一个节点，用于执行中国股票筛选。
+
+        此节点利用大型语言模型和预定义的市场分析工具，根据当前市场状况
+        和系统消息中定义的筛选策略（如价值投资、成长投资等），生成一份
+        股票筛选报告。
+
+        Args:
+            state (dict): 当前的计算图状态，必须包含 'trade_date' 键。
+
+        Returns:
+            dict: 一个包含新消息、股票筛选报告和发送者标识的字典，
+                  用于更新计算图的状态。
+        """
         current_date = state["trade_date"]
         
         tools = [

@@ -19,14 +19,30 @@ logger = get_logger('agents')
 
 
 class StockDataCache:
-    """股票数据缓存管理器 - 支持美股和A股数据缓存优化"""
+    """股票数据文件缓存管理器。
+
+    该类负责将股票相关的各类数据（历史行情、新闻、基本面分析）高效地
+    存储在本地文件系统中，以减少对外部API的重复调用。它具有以下特性：
+
+    - **市场分类存储**: 自动根据股票代码区分A股和美股，并将数据存放在
+      不同的子目录中，便于管理。
+    - **智能TTL（生存时间）**: 为不同类型和市场的数据配置了不同的默认
+      缓存有效期，例如A股数据更新更频繁，缓存时间更短。
+    - **元数据驱动**: 每个缓存文件都关联一个JSON格式的元数据文件，记录
+      了数据的来源、时间戳、参数等信息，用于精确查找和验证缓存。
+    - **内容长度检查**: 可选功能，用于防止因内容过长（例如超长的新闻或
+      分析报告）而缓存过多数据，特别是当没有配置长文本处理的大语言模型
+      (LLM)时，可以自动跳过缓存。
+    - **格式支持**: 支持将`pandas.DataFrame`保存为CSV，或将普通字符串
+      保存为TXT文件。
+    """
 
     def __init__(self, cache_dir: str = None):
-        """
-        初始化缓存管理器
+        """初始化StockDataCache。
 
         Args:
-            cache_dir: 缓存目录路径，默认为 tradingagents/dataflows/data_cache
+            cache_dir (str, optional): 缓存文件的根目录。如果为None，
+                则默认为 `tradingagents/dataflows/data_cache`。
         """
         if cache_dir is None:
             # 获取当前文件所在目录
@@ -98,7 +114,14 @@ class StockDataCache:
         logger.info(f"   A股数据: ✅ 已配置")
 
     def _determine_market_type(self, symbol: str) -> str:
-        """根据股票代码确定市场类型"""
+        """根据股票代码的格式粗略判断其所属市场（中国或美国）。
+
+        Args:
+            symbol (str): 股票代码。
+
+        Returns:
+            str: 'china' 或 'us'。
+        """
         import re
 
         # 判断是否为中国A股（6位数字）
@@ -108,7 +131,11 @@ class StockDataCache:
             return 'us'
 
     def _check_provider_availability(self) -> List[str]:
-        """检查可用的LLM提供商"""
+        """检查当前环境中配置了哪些大语言模型（LLM）提供商的API密钥。
+
+        Returns:
+            List[str]: 可用的提供商名称列表 (例如, ['dashscope', 'openai'])。
+        """
         available_providers = []
         
         # 检查DashScope
@@ -136,15 +163,17 @@ class StockDataCache:
         return available_providers
 
     def should_skip_cache_for_content(self, content: str, data_type: str = "unknown") -> bool:
-        """
-        判断是否因为内容超长而跳过缓存
-        
+        """根据内容长度和可用的LLM提供商，决定是否应跳过缓存。
+
+        如果启用了长度检查、内容超过了最大长度，并且没有配置任何支持
+        长文本处理的LLM提供商，则此方法建议跳过缓存。
+
         Args:
-            content: 要缓存的内容
-            data_type: 数据类型（用于日志）
-        
+            content (str): 准备要缓存的文本内容。
+            data_type (str, optional): 数据类型描述，用于日志记录。
+
         Returns:
-            bool: 是否应该跳过缓存
+            bool: 如果应跳过缓存，则为 True，否则为 False。
         """
         # 如果未启用长度检查，直接返回False
         if not self.content_length_config['enable_length_check']:
@@ -174,7 +203,16 @@ class StockDataCache:
             return False
     
     def _generate_cache_key(self, data_type: str, symbol: str, **kwargs) -> str:
-        """生成缓存键"""
+        """基于数据类型、股票代码及其他参数生成一个确定性的缓存键。
+
+        Args:
+            data_type (str): 数据类型 (例如, 'stock_data')。
+            symbol (str): 股票代码。
+            **kwargs: 其他用于生成键的参数 (例如, start_date, data_source)。
+
+        Returns:
+            str: 生成的唯一缓存键。
+        """
         # 创建一个包含所有参数的字符串
         params_str = f"{data_type}_{symbol}"
         for key, value in sorted(kwargs.items()):
@@ -185,7 +223,17 @@ class StockDataCache:
         return f"{symbol}_{data_type}_{cache_key}"
     
     def _get_cache_path(self, data_type: str, cache_key: str, file_format: str = "json", symbol: str = None) -> Path:
-        """获取缓存文件路径 - 支持市场分类"""
+        """根据数据类型、市场和文件名构建缓存文件的完整路径。
+
+        Args:
+            data_type (str): 数据类型。
+            cache_key (str): 缓存键。
+            file_format (str, optional): 文件扩展名。
+            symbol (str, optional): 股票代码，用于确定市场子目录。
+
+        Returns:
+            Path: 指向缓存文件的 `pathlib.Path` 对象。
+        """
         if symbol:
             market_type = self._determine_market_type(symbol)
         else:
@@ -205,11 +253,23 @@ class StockDataCache:
         return base_dir / f"{cache_key}.{file_format}"
     
     def _get_metadata_path(self, cache_key: str) -> Path:
-        """获取元数据文件路径"""
+        """获取指定缓存键的元数据文件路径。
+
+        Args:
+            cache_key (str): 缓存键。
+
+        Returns:
+            Path: 指向元数据文件的路径。
+        """
         return self.metadata_dir / f"{cache_key}_meta.json"
     
     def _save_metadata(self, cache_key: str, metadata: Dict[str, Any]):
-        """保存元数据"""
+        """将元数据以JSON格式保存到文件。
+
+        Args:
+            cache_key (str): 缓存键。
+            metadata (Dict[str, Any]): 要保存的元数据字典。
+        """
         metadata_path = self._get_metadata_path(cache_key)
         metadata_path.parent.mkdir(parents=True, exist_ok=True)  # 确保目录存在
         metadata['cached_at'] = datetime.now().isoformat()
@@ -218,7 +278,15 @@ class StockDataCache:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
     
     def _load_metadata(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """加载元数据"""
+        """从文件加载并解析元数据。
+
+        Args:
+            cache_key (str): 缓存键。
+
+        Returns:
+            Optional[Dict[str, Any]]: 如果成功，返回元数据字典；
+                否则返回 None。
+        """
         metadata_path = self._get_metadata_path(cache_key)
         if not metadata_path.exists():
             return None
@@ -231,7 +299,20 @@ class StockDataCache:
             return None
     
     def is_cache_valid(self, cache_key: str, max_age_hours: int = None, symbol: str = None, data_type: str = None) -> bool:
-        """检查缓存是否有效 - 支持智能TTL配置"""
+        """检查指定的缓存键是否仍然有效。
+
+        它会根据元数据中的时间戳和智能TTL配置来判断缓存是否过期。
+
+        Args:
+            cache_key (str): 要检查的缓存键。
+            max_age_hours (int, optional): 手动指定的最大缓存小时数。
+                如果为None，则使用 `cache_config` 中的智能配置。
+            symbol (str, optional): 股票代码，用于帮助确定TTL。
+            data_type (str, optional): 数据类型，用于帮助确定TTL。
+
+        Returns:
+            bool: 如果缓存有效，返回 True；否则返回 False。
+        """
         metadata = self._load_metadata(cache_key)
         if not metadata:
             return False
@@ -266,18 +347,20 @@ class StockDataCache:
     def save_stock_data(self, symbol: str, data: Union[pd.DataFrame, str],
                        start_date: str = None, end_date: str = None,
                        data_source: str = "unknown") -> str:
-        """
-        保存股票数据到缓存 - 支持美股和A股分类存储
+        """将股票历史行情数据保存到缓存。
+
+        根据数据是DataFrame还是字符串，分别保存为CSV或TXT文件。
 
         Args:
-            symbol: 股票代码
-            data: 股票数据（DataFrame或字符串）
-            start_date: 开始日期
-            end_date: 结束日期
-            data_source: 数据源（如 "tdx", "yfinance", "finnhub"）
+            symbol (str): 股票代码。
+            data (Union[pd.DataFrame, str]): 股票数据。
+            start_date (str, optional): 数据开始日期。
+            end_date (str, optional): 数据结束日期。
+            data_source (str, optional): 数据来源 (例如, "yfinance")。
 
         Returns:
-            cache_key: 缓存键
+            str: 生成的缓存键。如果因内容过长而跳过，返回的是一个
+                虚拟的缓存键。
         """
         # 检查内容长度是否需要跳过缓存
         content_to_check = str(data)
@@ -332,7 +415,15 @@ class StockDataCache:
         return cache_key
     
     def load_stock_data(self, cache_key: str) -> Optional[Union[pd.DataFrame, str]]:
-        """从缓存加载股票数据"""
+        """根据缓存键从文件加载股票数据。
+
+        Args:
+            cache_key (str): 缓存键。
+
+        Returns:
+            Optional[Union[pd.DataFrame, str]]: 返回加载的数据，如果
+                文件不存在或加载失败，则返回 None。
+        """
         metadata = self._load_metadata(cache_key)
         if not metadata:
             return None
@@ -354,18 +445,20 @@ class StockDataCache:
     def find_cached_stock_data(self, symbol: str, start_date: str = None,
                               end_date: str = None, data_source: str = None,
                               max_age_hours: int = None) -> Optional[str]:
-        """
-        查找匹配的缓存数据 - 支持智能市场分类查找
+        """查找与给定参数匹配的有效股票数据缓存。
+
+        首先尝试精确匹配所有参数，如果找不到，则会放宽条件，查找该股票
+        代码下的任何其他有效缓存。
 
         Args:
-            symbol: 股票代码
-            start_date: 开始日期
-            end_date: 结束日期
-            data_source: 数据源
-            max_age_hours: 最大缓存时间（小时），None时使用智能配置
+            symbol (str): 股票代码。
+            start_date (str, optional): 数据开始日期。
+            end_date (str, optional): 数据结束日期。
+            data_source (str, optional): 数据来源。
+            max_age_hours (int, optional): 手动指定最大缓存时间。
 
         Returns:
-            cache_key: 如果找到有效缓存则返回缓存键，否则返回None
+            Optional[str]: 如果找到，返回缓存键；否则返回 None。
         """
         market_type = self._determine_market_type(symbol)
 
@@ -413,7 +506,18 @@ class StockDataCache:
     def save_news_data(self, symbol: str, news_data: str, 
                       start_date: str = None, end_date: str = None,
                       data_source: str = "unknown") -> str:
-        """保存新闻数据到缓存"""
+        """将新闻数据（字符串）保存到缓存。
+
+        Args:
+            symbol (str): 相关股票代码。
+            news_data (str): 新聞文本内容。
+            start_date (str, optional): 新闻时间范围的开始日期。
+            end_date (str, optional): 新闻时间范围的结束日期。
+            data_source (str, optional): 新闻来源。
+
+        Returns:
+            str: 生成的缓存键。
+        """
         # 检查内容长度是否需要跳过缓存
         if self.should_skip_cache_for_content(news_data, "新闻数据"):
             # 生成一个虚拟的缓存键，但不实际保存
@@ -452,7 +556,16 @@ class StockDataCache:
     
     def save_fundamentals_data(self, symbol: str, fundamentals_data: str,
                               data_source: str = "unknown") -> str:
-        """保存基本面数据到缓存"""
+        """将基本面分析数据（字符串）保存到缓存。
+
+        Args:
+            symbol (str): 相关股票代码。
+            fundamentals_data (str): 基本面分析的文本内容。
+            data_source (str, optional): 数据来源 (例如, "openai")。
+
+        Returns:
+            str: 生成的缓存键。
+        """
         # 检查内容长度是否需要跳过缓存
         if self.should_skip_cache_for_content(fundamentals_data, "基本面数据"):
             # 生成一个虚拟的缓存键，但不实际保存
@@ -492,7 +605,15 @@ class StockDataCache:
         return cache_key
     
     def load_fundamentals_data(self, cache_key: str) -> Optional[str]:
-        """从缓存加载基本面数据"""
+        """根据缓存键从文件加载基本面数据。
+
+        Args:
+            cache_key (str): 缓存键。
+
+        Returns:
+            Optional[str]: 返回加载的文本数据，如果文件不存在或加载
+                失败，则返回 None。
+        """
         metadata = self._load_metadata(cache_key)
         if not metadata:
             return None
@@ -510,16 +631,15 @@ class StockDataCache:
     
     def find_cached_fundamentals_data(self, symbol: str, data_source: str = None,
                                     max_age_hours: int = None) -> Optional[str]:
-        """
-        查找匹配的基本面缓存数据
-        
+        """查找与给定参数匹配的有效基本面数据缓存。
+
         Args:
-            symbol: 股票代码
-            data_source: 数据源（如 "openai", "finnhub"）
-            max_age_hours: 最大缓存时间（小时），None时使用智能配置
-        
+            symbol (str): 股票代码。
+            data_source (str, optional): 数据来源。
+            max_age_hours (int, optional): 手动指定最大缓存时间。
+
         Returns:
-            cache_key: 如果找到有效缓存则返回缓存键，否则返回None
+            Optional[str]: 如果找到，返回缓存键；否则返回 None。
         """
         market_type = self._determine_market_type(symbol)
         
@@ -552,7 +672,11 @@ class StockDataCache:
         return None
     
     def clear_old_cache(self, max_age_days: int = 7):
-        """清理过期缓存"""
+        """清理所有超过指定天数的旧缓存文件及其元数据。
+
+        Args:
+            max_age_days (int, optional): 清理的阈值天数。默认7天。
+        """
         cutoff_time = datetime.now() - timedelta(days=max_age_days)
         cleared_count = 0
         
@@ -578,7 +702,13 @@ class StockDataCache:
         logger.info(f"🧹 已清理 {cleared_count} 个过期缓存文件")
     
     def get_cache_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息"""
+        """获取并返回当前缓存系统的统计信息。
+
+        包括各类数据的数量、总文件大小以及因内容过长而跳过的缓存数量。
+
+        Returns:
+            Dict[str, Any]: 包含统计信息的字典。
+        """
         stats = {
             'total_files': 0,
             'stock_data_count': 0,
@@ -618,7 +748,12 @@ class StockDataCache:
         return stats
 
     def get_content_length_config_status(self) -> Dict[str, Any]:
-        """获取内容长度配置状态"""
+        """获取关于内容长度检查配置的当前状态和诊断信息。
+
+        Returns:
+            Dict[str, Any]: 包含配置状态的字典，例如是否启用、
+                最大长度、可用的长文本LLM提供商等。
+        """
         available_providers = self._check_provider_availability()
         long_text_providers = self.content_length_config['long_text_providers']
         available_long_providers = [p for p in available_providers if p in long_text_providers]
@@ -639,7 +774,11 @@ class StockDataCache:
 _cache_instance = None
 
 def get_cache() -> StockDataCache:
-    """获取全局缓存实例"""
+    """获取StockDataCache的全局单例。
+
+    Returns:
+        StockDataCache: 缓存管理器的单例实例。
+    """
     global _cache_instance
     if _cache_instance is None:
         _cache_instance = StockDataCache()

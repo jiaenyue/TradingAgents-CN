@@ -36,21 +36,44 @@ except ImportError:
 
 
 class DatabaseCacheManager:
-    """MongoDB + Redis 数据库缓存管理器"""
+    """结合MongoDB和Redis实现的高性能数据库缓存管理器。
+
+    此类采用双层缓存策略：
+    1.  **Redis (主缓存/快速层)**: 用于存储频繁访问的热数据，设置了较短的
+        过期时间（TTL）。所有读取操作会首先尝试命中Redis，以实现最低延迟。
+    2.  **MongoDB (持久化层/回源层)**: 作为所有数据的持久化存储。当Redis
+        缓存未命中时，系统会从MongoDB读取数据，并将该数据重新加载（同步）
+        到Redis中，供后续快速访问。
+
+    主要功能包括：
+    - 自动处理MongoDB和Redis的连接与初始化。
+    - 在MongoDB中为不同类型的数据（行情、新闻、基本面）创建优化的索引。
+    - 提供统一的 `save` 和 `load` 方法，内部封装了双层缓存的逻辑。
+    - 自动序列化/反序列化 `pandas.DataFrame` 为JSON格式，便于存储。
+    - 提供缓存查找、统计和清理过期数据的功能。
+
+    Attributes:
+        mongodb_client: PyMongo的客户端实例。
+        mongodb_db: 当前操作的MongoDB数据库实例。
+        redis_client: Redis客户端实例。
+    """
     
     def __init__(self,
                  mongodb_url: Optional[str] = None,
                  redis_url: Optional[str] = None,
                  mongodb_db: str = "tradingagents",
                  redis_db: int = 0):
-        """
-        初始化数据库缓存管理器
+        """初始化数据库缓存管理器。
+
+        从环境变量或参数中获取连接信息，并建立与MongoDB和Redis的连接。
 
         Args:
-            mongodb_url: MongoDB连接URL，默认使用配置文件端口
-            redis_url: Redis连接URL，默认使用配置文件端口
-            mongodb_db: MongoDB数据库名
-            redis_db: Redis数据库编号
+            mongodb_url (Optional[str], optional): MongoDB连接字符串。
+                如果为None，则从环境变量构建。
+            redis_url (Optional[str], optional): Redis连接字符串。
+                如果为None，则从环境变量构建。
+            mongodb_db (str, optional): 要使用的MongoDB数据库名称。
+            redis_db (int, optional): 要使用的Redis数据库编号。
         """
         # 从配置文件获取正确的端口
         mongodb_port = os.getenv("MONGODB_PORT", "27018")
@@ -76,7 +99,7 @@ class DatabaseCacheManager:
         logger.error(f"   Redis: {'✅ 已连接' if self.redis_client else '❌ 未连接'}")
     
     def _init_mongodb(self):
-        """初始化MongoDB连接"""
+        """初始化到MongoDB的连接，并执行连接测试和索引创建。"""
         if not MONGODB_AVAILABLE:
             return
         
@@ -101,7 +124,7 @@ class DatabaseCacheManager:
             self.mongodb_db = None
     
     def _init_redis(self):
-        """初始化Redis连接"""
+        """初始化到Redis的连接，并执行连接测试。"""
         if not REDIS_AVAILABLE:
             return
         
@@ -123,7 +146,7 @@ class DatabaseCacheManager:
             self.redis_client = None
     
     def _create_mongodb_indexes(self):
-        """创建MongoDB索引"""
+        """为MongoDB中的各个集合创建必要的索引以优化查询性能。"""
         if self.mongodb_db is None:
             return
         
@@ -162,7 +185,16 @@ class DatabaseCacheManager:
             logger.error(f"⚠️ MongoDB索引创建失败: {e}")
     
     def _generate_cache_key(self, data_type: str, symbol: str, **kwargs) -> str:
-        """生成缓存键"""
+        """根据输入参数生成一个确定性的缓存键。
+
+        Args:
+            data_type (str): 数据类型 (例如, 'stock', 'news')。
+            symbol (str): 股票代码。
+            **kwargs: 其他相关参数。
+
+        Returns:
+            str: 格式化的唯一缓存键。
+        """
         params_str = f"{data_type}_{symbol}"
         for key, value in sorted(kwargs.items()):
             params_str += f"_{key}_{value}"
@@ -173,19 +205,21 @@ class DatabaseCacheManager:
     def save_stock_data(self, symbol: str, data: Union[pd.DataFrame, str],
                        start_date: str = None, end_date: str = None,
                        data_source: str = "unknown", market_type: str = None) -> str:
-        """
-        保存股票数据到MongoDB和Redis
-        
+        """将股票行情数据同时保存到MongoDB（持久化）和Redis（缓存）。
+
+        - 对于 `pd.DataFrame` 类型的数据，会将其序列化为JSON字符串进行存储。
+        - 自动推断市场类型（'china' 或 'us'）。
+
         Args:
-            symbol: 股票代码
-            data: 股票数据
-            start_date: 开始日期
-            end_date: 结束日期
-            data_source: 数据源
-            market_type: 市场类型 (us/china)
-        
+            symbol (str): 股票代码。
+            data (Union[pd.DataFrame, str]): 股票数据。
+            start_date (str, optional): 数据开始日期。
+            end_date (str, optional): 数据结束日期。
+            data_source (str, optional): 数据来源。
+            market_type (str, optional): 市场类型。如果为None，则自动推断。
+
         Returns:
-            cache_key: 缓存键
+            str: 生成并用于存储的缓存键。
         """
         cache_key = self._generate_cache_key("stock", symbol,
                                            start_date=start_date,
@@ -254,7 +288,18 @@ class DatabaseCacheManager:
         return cache_key
     
     def load_stock_data(self, cache_key: str) -> Optional[Union[pd.DataFrame, str]]:
-        """从Redis或MongoDB加载股票数据"""
+        """从缓存中加载股票数据，遵循 "Redis优先" 策略。
+
+        首先尝试从Redis获取数据。如果Redis未命中，则回源到MongoDB查找，
+        并将找到的数据重新加载到Redis中以备后续访问。
+
+        Args:
+            cache_key (str): 要加载的数据的缓存键。
+
+        Returns:
+            Optional[Union[pd.DataFrame, str]]: 返回反序列化后的数据
+                (DataFrame或字符串)。如果两个数据源都找不到，则返回None。
+        """
         
         # 首先尝试从Redis加载（更快）
         if self.redis_client:
@@ -312,7 +357,22 @@ class DatabaseCacheManager:
     def find_cached_stock_data(self, symbol: str, start_date: str = None,
                               end_date: str = None, data_source: str = None,
                               max_age_hours: int = 6) -> Optional[str]:
-        """查找匹配的缓存数据"""
+        """根据查询参数在Redis和MongoDB中查找有效的股票数据缓存。
+
+        - 首先在Redis中查找与所有参数精确匹配的键。
+        - 如果Redis未命中，则在MongoDB中进行更灵活的查询，查找在指定
+          时间窗口内创建的、符合条件的最新文档。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str, optional): 数据开始日期。
+            end_date (str, optional): 数据结束日期。
+            data_source (str, optional): 数据来源。
+            max_age_hours (int, optional): 缓存的最大有效小时数。
+
+        Returns:
+            Optional[str]: 如果找到有效的缓存，返回其缓存键；否则返回None。
+        """
         
         # 生成精确匹配的缓存键
         exact_key = self._generate_cache_key("stock", symbol,
@@ -359,7 +419,18 @@ class DatabaseCacheManager:
     def save_news_data(self, symbol: str, news_data: str,
                       start_date: str = None, end_date: str = None,
                       data_source: str = "unknown") -> str:
-        """保存新闻数据到MongoDB和Redis"""
+        """将新闻数据保存到MongoDB和Redis。
+
+        Args:
+            symbol (str): 股票代码。
+            news_data (str): 新闻内容的文本。
+            start_date (str, optional): 新闻时间范围的开始日期。
+            end_date (str, optional): 新闻时间范围的结束日期。
+            data_source (str, optional): 新闻来源。
+
+        Returns:
+            str: 生成的缓存键。
+        """
         cache_key = self._generate_cache_key("news", symbol,
                                            start_date=start_date,
                                            end_date=end_date,
@@ -410,7 +481,17 @@ class DatabaseCacheManager:
     def save_fundamentals_data(self, symbol: str, fundamentals_data: str,
                               analysis_date: str = None,
                               data_source: str = "unknown") -> str:
-        """保存基本面数据到MongoDB和Redis"""
+        """将基本面分析数据保存到MongoDB和Redis。
+
+        Args:
+            symbol (str): 股票代码。
+            fundamentals_data (str): 基本面分析报告的文本内容。
+            analysis_date (str, optional): 分析报告的日期。
+            data_source (str, optional): 数据来源（例如，LLM模型的名称）。
+
+        Returns:
+            str: 生成的缓存键。
+        """
         if not analysis_date:
             analysis_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -460,7 +541,13 @@ class DatabaseCacheManager:
         return cache_key
 
     def get_cache_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息"""
+        """获取并返回MongoDB和Redis缓存的当前统计信息。
+
+        包括连接状态、文档数量、集合大小、Redis键数量和内存使用情况。
+
+        Returns:
+            Dict[str, Any]: 包含详细统计信息的字典。
+        """
         stats = {
             "mongodb": {"available": self.mongodb_db is not None, "collections": {}},
             "redis": {"available": self.redis_client is not None, "keys": 0, "memory_usage": "N/A"}
@@ -492,7 +579,13 @@ class DatabaseCacheManager:
         return stats
 
     def clear_old_cache(self, max_age_days: int = 7):
-        """清理过期缓存"""
+        """从MongoDB中清理所有超过指定天数的旧缓存记录。
+
+        注意：Redis中的键会因其自身的TTL设置而自动过期，无需手动清理。
+
+        Args:
+            max_age_days (int, optional): 清理的阈值天数。
+        """
         cutoff_time = datetime.utcnow() - timedelta(days=max_age_days)
         cleared_count = 0
 
@@ -512,7 +605,7 @@ class DatabaseCacheManager:
         return cleared_count
 
     def close(self):
-        """关闭数据库连接"""
+        """安全地关闭与MongoDB和Redis的数据库连接。"""
         if self.mongodb_client:
             self.mongodb_client.close()
             logger.info(f"🔒 MongoDB连接已关闭")
@@ -526,7 +619,11 @@ class DatabaseCacheManager:
 _db_cache_instance = None
 
 def get_db_cache() -> DatabaseCacheManager:
-    """获取全局数据库缓存实例"""
+    """获取DatabaseCacheManager的全局单例。
+
+    Returns:
+        DatabaseCacheManager: 数据库缓存管理器的单例实例。
+    """
     global _db_cache_instance
     if _db_cache_instance is None:
         _db_cache_instance = DatabaseCacheManager()

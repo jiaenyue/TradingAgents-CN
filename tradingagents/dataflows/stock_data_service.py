@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 统一的股票数据获取服务
-实现MongoDB -> Tushare数据接口的完整降级机制
+
+该模块定义了 `StockDataService`, 这是一个核心服务类, 负责以一种健壮
+且带有降级策略的方式提供股票数据。
+
+主要目标是屏蔽底层数据源的复杂性, 为上层应用提供一个统一、稳定的接口。
+它实现了从 MongoDB (优先) 到实时接口 (备用) 的完整降级机制。
 """
 
 import pandas as pd
@@ -36,16 +41,24 @@ logger = logging.getLogger(__name__)
 
 class StockDataService:
     """
-    统一的股票数据获取服务
-    实现完整的降级机制：MongoDB -> Tushare数据接口 -> 缓存 -> 错误处理
+    统一的股票数据获取服务。
+
+    该类实现了完整的降级机制来获取股票数据, 优先顺序如下:
+    1. MongoDB: 从本地数据库快速获取缓存的、持久化的数据。
+    2. 增强型获取器 (Enhanced Fetcher): 作为备用方案, 从实时数据接口获取数据。
+    3. 备用数据 (Fallback): 在所有其他源都失败时, 生成一条包含错误信息的记录。
     """
     
     def __init__(self):
+        """初始化 StockDataService, 并尝试连接到数据库。"""
         self.db_manager = None
         self._init_services()
     
     def _init_services(self):
-        """初始化服务"""
+        """
+        初始化依赖的服务, 主要是数据库管理器。
+        如果数据库连接失败, 服务会优雅地降级, 而不会中断。
+        """
         # 尝试初始化数据库管理器
         if DATABASE_MANAGER_AVAILABLE:
             try:
@@ -60,13 +73,19 @@ class StockDataService:
     
     def get_stock_basic_info(self, stock_code: str = None) -> Optional[Dict[str, Any]]:
         """
-        获取股票基础信息（单个股票或全部股票）
-        
+        获取单个或所有股票的基础信息, 采用降级策略。
+
+        获取顺序: MongoDB -> 增强型获取器 -> 生成备用数据。
+        从增强型获取器成功获取的数据会自动尝试缓存回 MongoDB。
+
         Args:
-            stock_code: 股票代码，如果为None则返回所有股票
+            stock_code (str, optional): 如果提供, 则查询单个股票。如果为 None,
+                                        则查询所有股票。默认为 None。
         
         Returns:
-            Dict: 股票基础信息
+            Optional[Dict[str, Any]]: 对于单个股票查询, 返回包含其基础信息的字典。
+                                     对于所有股票查询, 返回字典列表。
+                                     如果所有源都失败, 返回包含错误信息的字典。
         """
         logger.info(f"📊 获取股票基础信息: {stock_code or '全部股票'}")
         
@@ -98,7 +117,15 @@ class StockDataService:
         return self._get_fallback_data(stock_code)
     
     def _get_from_mongodb(self, stock_code: str = None) -> Optional[Dict[str, Any]]:
-        """从MongoDB获取数据"""
+        """
+        (内部方法) 从 MongoDB 获取股票基础信息。
+
+        Args:
+            stock_code (str, optional): 股票代码或 None。
+
+        Returns:
+            Optional[Dict[str, Any]]: 查询结果, 单个字典或字典列表。
+        """
         try:
             mongodb_client = self.db_manager.get_mongodb_client()
             if not mongodb_client:
@@ -122,7 +149,15 @@ class StockDataService:
             return None
     
     def _get_from_enhanced_fetcher(self, stock_code: str = None) -> Optional[Dict[str, Any]]:
-        """从增强获取器获取数据"""
+        """
+        (内部方法) 通过增强型获取器从实时接口获取股票基础信息。
+
+        Args:
+            stock_code (str, optional): 股票代码或 None。
+
+        Returns:
+            Optional[Dict[str, Any]]: 格式化后的查询结果, 单个字典或字典列表。
+        """
         try:
             if stock_code:
                 # 获取单个股票信息 - 使用增强获取器获取所有股票然后筛选
@@ -182,7 +217,17 @@ class StockDataService:
             return None
     
     def _cache_to_mongodb(self, data: Any) -> bool:
-        """将数据缓存到MongoDB"""
+        """
+        (内部方法) 将从其他源获取的数据缓存到 MongoDB。
+
+        如果 MongoDB 不可用, 此操作将静默失败。
+
+        Args:
+            data (Any): 要缓存的数据, 可以是单个字典或字典列表。
+
+        Returns:
+            bool: 如果缓存成功或无需缓存, 返回 True, 否则 False。
+        """
         if not self.db_manager or not self.db_manager.mongodb_db:
             return False
         
@@ -214,7 +259,15 @@ class StockDataService:
             return False
     
     def _get_fallback_data(self, stock_code: str = None) -> Dict[str, Any]:
-        """最后的降级数据"""
+        """
+        (内部方法) 在所有数据源都失败时, 生成备用的占位数据。
+
+        Args:
+            stock_code (str, optional): 股票代码或 None。
+
+        Returns:
+            Dict[str, Any]: 包含错误信息的备用数据。
+        """
         if stock_code:
             return {
                 'code': stock_code,
@@ -232,7 +285,15 @@ class StockDataService:
             }
     
     def _get_market_name(self, stock_code: str) -> str:
-        """根据股票代码判断市场"""
+        """
+        (内部辅助方法) 根据股票代码的常见前缀判断其所属市场。
+
+        Args:
+            stock_code (str): 股票代码。
+
+        Returns:
+            str: 市场名称 ('上海', '深圳', '未知')。
+        """
         if stock_code.startswith(('60', '68', '90')):
             return '上海'
         elif stock_code.startswith(('00', '30', '20')):
@@ -241,7 +302,15 @@ class StockDataService:
             return '未知'
     
     def _get_stock_category(self, stock_code: str) -> str:
-        """根据股票代码判断类别"""
+        """
+        (内部辅助方法) 根据股票代码的常见前缀判断其板块类别。
+
+        Args:
+            stock_code (str): 股票代码。
+
+        Returns:
+            str: 板块名称 (如 '沪市主板', '创业板' 等)。
+        """
         if stock_code.startswith('60'):
             return '沪市主板'
         elif stock_code.startswith('68'):
@@ -257,8 +326,18 @@ class StockDataService:
     
     def get_stock_data_with_fallback(self, stock_code: str, start_date: str, end_date: str) -> str:
         """
-        获取股票数据（带降级机制）
-        这是对现有get_china_stock_data函数的增强
+        获取股票历史行情数据, 并利用统一数据接口的降级能力。
+
+        这是对 `interface.get_china_stock_data_unified` 函数的封装,
+        在调用前会先检查股票基础信息是否可获取。
+
+        Args:
+            stock_code (str): 股票代码。
+            start_date (str): 开始日期, 格式 'YYYY-MM-DD'。
+            end_date (str): 结束日期, 格式 'YYYY-MM-DD'。
+
+        Returns:
+            str: 格式化的数据报告或错误信息字符串。
         """
         logger.info(f"📊 获取股票数据: {stock_code} ({start_date} 到 {end_date})")
         
@@ -279,7 +358,15 @@ class StockDataService:
 _stock_data_service = None
 
 def get_stock_data_service() -> StockDataService:
-    """获取股票数据服务实例（单例模式）"""
+    """
+    获取 StockDataService 的全局单例。
+
+    使用单例模式确保整个应用共享同一个服务实例, 避免重复的数据库连接
+    和资源初始化。
+
+    Returns:
+        StockDataService: 全局唯一的 StockDataService 实例。
+    """
     global _stock_data_service
     if _stock_data_service is None:
         _stock_data_service = StockDataService()

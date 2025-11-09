@@ -31,18 +31,25 @@ except ImportError as e:
     SERVICE_AVAILABLE = False
 
 def get_stock_info(stock_code: str) -> Dict[str, Any]:
-    """
-    获取单个股票的基础信息
-    
+    """获取单个股票的基础信息。
+
+    本函数通过后端的股票数据服务查询指定股票代码的基础信息，
+    包括股票名称、所属市场、类别等。如果数据服务不可用或未找到
+    对应股票，将返回包含错误信息的字典。
+
     Args:
-        stock_code: 股票代码（如 '000001'）
-    
+        stock_code: 要查询的股票代码，例如 '000001'。
+
     Returns:
-        Dict: 股票基础信息
+        一个包含股票基础信息的字典。如果成功，字典将包含 'code',
+        'name', 'market' 等键。如果失败，则包含 'error' 键及
+        错误描述。
     
     Example:
         >>> info = get_stock_info('000001')
-        >>> print(info['name'])  # 平安银行
+        >>> if 'error' not in info:
+        ...     print(info.get('name'))
+        平安银行
     """
     if not SERVICE_AVAILABLE:
         return {
@@ -64,15 +71,20 @@ def get_stock_info(stock_code: str) -> Dict[str, Any]:
     return result
 
 def get_all_stocks() -> List[Dict[str, Any]]:
-    """
-    获取所有股票的基础信息
-    
+    """获取市场中所有股票的基础信息列表。
+
+    通过后端的股票数据服务获取一个包含所有上市股票基础信息的列表。
+    每个股票的信息以字典形式表示。如果服务不可用或无法获取数据，
+    将返回一个包含错误信息的单元素列表。
+
     Returns:
-        List[Dict]: 所有股票的基础信息列表
-    
+        一个包含多个股票信息字典的列表。如果获取失败，返回一个
+        形如 [{'error': '...', 'suggestion': '...'}] 的列表。
+
     Example:
         >>> stocks = get_all_stocks()
-        logger.info(f"共有{len(stocks)}只股票")
+        >>> if 'error' not in stocks[0]:
+        ...     print(f"市场共有 {len(stocks)} 只股票。")
     """
     if not SERVICE_AVAILABLE:
         return [{
@@ -92,20 +104,26 @@ def get_all_stocks() -> List[Dict[str, Any]]:
     return result if isinstance(result, list) else [result]
 
 def get_stock_data(stock_code: str, start_date: str = None, end_date: str = None) -> str:
-    """
-    获取股票历史数据（带降级机制）
-    
+    """获取指定股票在特定时间范围内的历史市场数据。
+
+    此函数调用后端服务，该服务内置了降级机制（例如，从Tushare失败
+    后尝试Akshare），以确保数据获取的稳定性。返回的数据是经过格式化
+    的字符串，通常用于直接展示或传递给大型语言模型进行分析。
+
     Args:
-        stock_code: 股票代码
-        start_date: 开始日期（格式：YYYY-MM-DD），默认为30天前
-        end_date: 结束日期（格式：YYYY-MM-DD），默认为今天
-    
+        stock_code: 要查询的股票代码。
+        start_date: 数据查询的开始日期，格式为 'YYYY-MM-DD'。
+                      如果为 None，则默认为当前日期之前的30天。
+        end_date: 数据查询的结束日期，格式为 'YYYY-MM-DD'。
+                    如果为 None，则默认为当前日期。
+
     Returns:
-        str: 股票数据的字符串表示或错误信息
-    
+        包含股票历史数据的格式化字符串。如果数据获取失败，则返回
+        相应的错误信息字符串。
+
     Example:
         >>> data = get_stock_data('000001', '2024-01-01', '2024-01-31')
-        >>> print(data)
+        >>> print(data[:100])
     """
     if not SERVICE_AVAILABLE:
         return "❌ 股票数据服务不可用，请检查服务配置"
@@ -121,19 +139,23 @@ def get_stock_data(stock_code: str, start_date: str = None, end_date: str = None
     return service.get_stock_data_with_fallback(stock_code, start_date, end_date)
 
 def search_stocks(keyword: str) -> List[Dict[str, Any]]:
-    """
-    根据关键词搜索股票
-    
+    """根据关键词（股票代码或名称）在本地缓存的股票列表中进行搜索。
+
+    此函数首先获取完整的股票列表，然后遍历该列表，匹配所有
+    代码或名称中包含指定关键词的股票。搜索过程不区分大小写。
+
     Args:
-        keyword: 搜索关键词（股票代码或名称的一部分）
-    
+        keyword: 用于搜索的关键词，可以是股票代码的一部分或
+                 公司名称的一部分。
+
     Returns:
-        List[Dict]: 匹配的股票信息列表
-    
+        一个列表，包含所有匹配搜索条件的股票信息字典。如果
+        无法获取股票列表，将返回一个包含错误信息的列表。
+
     Example:
-        >>> results = search_stocks('平安')
+        >>> results = search_stocks('科技')
         >>> for stock in results:
-        logger.info(f"{stock["code']}: {stock['name']}")
+        ...     print(f"{stock.get('code')}: {stock.get('name')}")
     """
     all_stocks = get_all_stocks()
     
@@ -157,15 +179,20 @@ def search_stocks(keyword: str) -> List[Dict[str, Any]]:
     return matches
 
 def get_market_summary() -> Dict[str, Any]:
-    """
-    获取市场概览信息
-    
+    """获取整个市场的概览统计信息。
+
+    该函数通过分析完整的股票列表，提供关于市场的宏观数据，
+    包括总股票数量、沪市和深市的股票数量、按类别划分的统计
+    以及数据源和更新时间等信息。
+
     Returns:
-        Dict: 市场统计信息
-    
+        一个包含市场概览信息的字典。如果无法获取股票列表，
+        则返回包含错误信息的字典。
+
     Example:
         >>> summary = get_market_summary()
-        logger.info(f"沪市股票数量: {summary["shanghai_count']}")
+        >>> if 'error' not in summary:
+        ...     print(f"总股票数: {summary.get('total_count')}")
     """
     all_stocks = get_all_stocks()
     
@@ -204,15 +231,19 @@ def get_market_summary() -> Dict[str, Any]:
     }
 
 def check_service_status() -> Dict[str, Any]:
-    """
-    检查服务状态
-    
+    """检查后端数据服务的整体健康状况。
+
+    此函数提供一个全面的健康检查端点，用于监控服务及其依赖项
+    （如MongoDB、统一数据接口）的状态。它可以帮助快速诊断系统
+    中可能存在的问题。
+
     Returns:
-        Dict: 服务状态信息
-    
+        一个包含服务状态信息的字典，其中包括服务是否可用、
+        数据库连接状态、API可用性等关键指标。
+
     Example:
         >>> status = check_service_status()
-        logger.info(f"MongoDB状态: {status["mongodb_status']}")
+        >>> print(f"服务是否可用: {status.get('service_available')}")
     """
     if not SERVICE_AVAILABLE:
         return {

@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 """
-优化的A股数据获取工具
-集成缓存策略和Tushare数据接口，提高数据获取效率
+优化的中国A股数据获取工具。
+
+该模块提供了一个 `OptimizedChinaDataProvider` 类, 旨在为A股市场
+数据的获取提供一个高效、稳定且带有缓存功能的接口。它整合了统一的
+数据源管理器 (`data_source_manager`), 能够利用多种数据接口 (如 Tushare,
+AKShare), 并实现了多级缓存策略以减少不必要的API调用。
+
+主要特性:
+- **缓存优先**: 在请求数据时, 首先检查有效的本地缓存。
+- **智能API调用**: 缓存未命中时, 通过统一数据源接口获取实时数据。
+- **速率限制**: 内置API调用速率控制器, 避免因请求过于频繁而被封禁。
+- **故障备援**: 在API调用失败时, 尝试使用过期的旧缓存或生成备用
+  模拟数据, 以保证程序的健壮性。
+- **基本面分析**: 能够基于获取的行情数据, 结合预设的行业模型和财务
+  估算, 生成一份结构化的基本面分析报告。
 """
 
 import os
@@ -18,9 +31,15 @@ logger = get_logger('agents')
 
 
 class OptimizedChinaDataProvider:
-    """优化的A股数据提供器 - 集成缓存和Tushare数据接口"""
+    """优化的A股数据提供器。
+
+    该类封装了A股数据获取的复杂逻辑, 包括缓存管理、API调用速率控制
+    以及数据获取失败时的备援策略。它旨在为上层应用提供一个简单、
+    高效且可靠的A股数据接口。
+    """
     
     def __init__(self):
+        """初始化优化的A股数据提供器。"""
         self.cache = get_cache()
         self.config = get_config()
         self.last_api_call = 0
@@ -29,7 +48,7 @@ class OptimizedChinaDataProvider:
         logger.info(f"📊 优化A股数据提供器初始化完成")
     
     def _wait_for_rate_limit(self):
-        """等待API限制"""
+        """确保API调用之间有最小的时间间隔, 以避免触发速率限制。"""
         current_time = time.time()
         time_since_last_call = current_time - self.last_api_call
         
@@ -39,19 +58,25 @@ class OptimizedChinaDataProvider:
         
         self.last_api_call = time.time()
     
-    def get_stock_data(self, symbol: str, start_date: str, end_date: str, 
+    def get_stock_data(self, symbol: str, start_date: str, end_date: str,
                       force_refresh: bool = False) -> str:
         """
-        获取A股数据 - 优先使用缓存
-        
+        获取A股行情数据, 优先使用缓存。
+
+        该方法首先检查是否存在有效的缓存数据。如果未找到或被要求强制刷新,
+        它会通过统一数据源接口 (`data_source_manager`) 从外部API获取数据,
+        并将新数据存入缓存。如果API调用失败, 它会尝试返回一份过期的
+        旧缓存作为备用, 或者生成一份包含错误信息的模拟数据。
+
         Args:
-            symbol: 股票代码（6位数字）
-            start_date: 开始日期 (YYYY-MM-DD)
-            end_date: 结束日期 (YYYY-MM-DD)
-            force_refresh: 是否强制刷新缓存
-        
+            symbol (str): 股票代码 (通常是6位数字)。
+            start_date (str): 开始日期, 格式为 'YYYY-MM-DD'。
+            end_date (str): 结束日期, 格式为 'YYYY-MM-DD'。
+            force_refresh (bool, optional): 如果为 True, 则忽略现有缓存,
+                                            强制从API重新获取数据。默认为 False。
+
         Returns:
-            格式化的股票数据字符串
+            str: 包含格式化股票数据的字符串。
         """
         logger.info(f"📈 获取A股数据: {symbol} ({start_date} 到 {end_date})")
         
@@ -125,14 +150,19 @@ class OptimizedChinaDataProvider:
     
     def get_fundamentals_data(self, symbol: str, force_refresh: bool = False) -> str:
         """
-        获取A股基本面数据 - 优先使用缓存
-        
+        获取A股公司的基本面数据报告, 优先使用缓存。
+
+        如果缓存中没有有效的数据报告, 该方法会首先调用 `get_stock_data`
+        获取最近的行情数据, 然后基于这些数据和内置的分析模型生成一份
+        新的基本面报告, 并将其存入缓存。
+
         Args:
-            symbol: 股票代码
-            force_refresh: 是否强制刷新缓存
-        
+            symbol (str): 股票代码。
+            force_refresh (bool, optional): 如果为 True, 则强制重新生成
+                                            报告, 忽略现有缓存。默认为 False。
+
         Returns:
-            格式化的基本面数据字符串
+            str: 格式化的基本面数据分析报告。
         """
         logger.info(f"📊 获取A股基本面数据: {symbol}")
         
@@ -187,7 +217,15 @@ class OptimizedChinaDataProvider:
             return self._generate_fallback_fundamentals(symbol, error_msg)
     
     def _generate_fundamentals_report(self, symbol: str, stock_data: str) -> str:
-        """基于股票数据生成真实的基本面分析报告"""
+        """基于股票行情数据和预设模型, 生成一份基本面分析报告。
+
+        Args:
+            symbol (str): 股票代码。
+            stock_data (str): `get_stock_data` 返回的格式化行情数据。
+
+        Returns:
+            str: 结构化的基本面分析报告。
+        """
 
         # 添加详细的股票代码追踪日志
         logger.debug(f"🔍 [股票代码追踪] _generate_fundamentals_report 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
@@ -389,7 +427,14 @@ class OptimizedChinaDataProvider:
         return report
 
     def _get_industry_info(self, symbol: str) -> dict:
-        """根据股票代码获取行业信息"""
+        """根据股票代码的特征, 预估其行业信息和基本竞争格局。
+
+        Args:
+            symbol (str): 股票代码。
+
+        Returns:
+            dict: 包含行业、市场、分析和竞争优势等信息的字典。
+        """
 
         # 添加详细的股票代码追踪日志
         logger.debug(f"🔍 [股票代码追踪] _get_industry_info 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
@@ -456,7 +501,19 @@ class OptimizedChinaDataProvider:
         return info
 
     def _estimate_financial_metrics(self, symbol: str, current_price: str) -> dict:
-        """获取真实财务指标（优先使用Tushare真实数据，失败时使用估算）"""
+        """获取财务指标。
+
+        该方法优先尝试通过 `_get_real_financial_metrics` 从外部API获取
+        真实的财务数据。如果失败, 则调用 `_get_estimated_financial_metrics`
+        方法, 根据预设模板生成一套估算的财务指标。
+
+        Args:
+            symbol (str): 股票代码。
+            current_price (str): 当前股价的字符串表示。
+
+        Returns:
+            dict: 包含各项财务指标和评分的字典。
+        """
 
         # 提取价格数值
         try:
@@ -482,8 +539,17 @@ class OptimizedChinaDataProvider:
         
         return estimated_metrics
 
-    def _get_real_financial_metrics(self, symbol: str, price_value: float) -> dict:
-        """获取真实财务指标 - 优先使用AKShare"""
+    def _get_real_financial_metrics(self, symbol: str, price_value: float) -> Optional[dict]:
+        """尝试从外部API (优先AKShare, 备用Tushare) 获取真实的财务指标。
+
+        Args:
+            symbol (str): 股票代码。
+            price_value (float): 当前股价。
+
+        Returns:
+            Optional[dict]: 如果成功获取并解析了财务数据, 则返回包含指标的字典,
+                            否则返回 None。
+        """
         try:
             # 优先尝试AKShare数据源
             logger.info(f"🔄 优先尝试AKShare获取{symbol}财务数据")
@@ -541,8 +607,17 @@ class OptimizedChinaDataProvider:
         
         return None
 
-    def _parse_akshare_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> dict:
-        """解析AKShare财务数据为指标"""
+    def _parse_akshare_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> Optional[dict]:
+        """解析从 AKShare 获取的财务数据, 并计算关键指标。
+
+        Args:
+            financial_data (dict): 包含财务报表 (如 `main_indicators`) 的字典。
+            stock_info (dict): 包含股票基本信息的字典。
+            price_value (float): 当前股价。
+
+        Returns:
+            Optional[dict]: 如果解析成功, 返回包含财务指标和评分的字典, 否则返回 None。
+        """
         try:
             # 获取最新的财务数据
             balance_sheet = financial_data.get('balance_sheet', [])
@@ -717,8 +792,18 @@ class OptimizedChinaDataProvider:
             logger.error(f"❌ AKShare财务数据解析失败: {e}")
             return None
 
-    def _parse_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> dict:
-        """解析财务数据为指标"""
+    def _parse_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> Optional[dict]:
+        """解析从 Tushare (或其他类似源) 获取的财务数据, 并计算关键指标。
+
+        Args:
+            financial_data (dict): 包含财务报表 (如 `balance_sheet`, `income_statement`)
+                                   的字典。
+            stock_info (dict): 包含股票基本信息的字典。
+            price_value (float): 当前股价。
+
+        Returns:
+            Optional[dict]: 如果解析成功, 返回包含财务指标和评分的字典, 否则返回 None。
+        """
         try:
             # 获取最新的财务数据
             balance_sheet = financial_data.get('balance_sheet', [])
@@ -825,7 +910,15 @@ class OptimizedChinaDataProvider:
             return None
 
     def _calculate_fundamental_score(self, metrics: dict, stock_info: dict) -> float:
-        """计算基本面评分"""
+        """基于关键财务指标, 计算公司的基本面评分 (1-10分)。
+
+        Args:
+            metrics (dict): 包含财务指标的字典。
+            stock_info (dict): 包含行业等信息的字典。
+
+        Returns:
+            float: 基本面综合评分。
+        """
         score = 5.0  # 基础分
         
         # ROE评分
@@ -857,7 +950,14 @@ class OptimizedChinaDataProvider:
         return min(score, 10.0)
 
     def _calculate_valuation_score(self, metrics: dict) -> float:
-        """计算估值评分"""
+        """基于估值指标, 计算公司的估值吸引力评分 (1-10分)。
+
+        Args:
+            metrics (dict): 包含财务指标的字典。
+
+        Returns:
+            float: 估值吸引力评分。
+        """
         score = 5.0  # 基础分
         
         # PE评分
@@ -891,7 +991,15 @@ class OptimizedChinaDataProvider:
         return min(max(score, 1.0), 10.0)
 
     def _calculate_growth_score(self, metrics: dict, stock_info: dict) -> float:
-        """计算成长性评分"""
+        """基于行业属性, 预估公司的成长潜力评分 (1-10分)。
+
+        Args:
+            metrics (dict): 包含财务指标的字典。
+            stock_info (dict): 包含行业等信息的字典。
+
+        Returns:
+            float: 成长潜力评分。
+        """
         score = 6.0  # 基础分
         
         # 根据行业调整
@@ -904,7 +1012,15 @@ class OptimizedChinaDataProvider:
         return min(max(score, 1.0), 10.0)
 
     def _calculate_risk_level(self, metrics: dict, stock_info: dict) -> str:
-        """计算风险等级"""
+        """基于财务健康度和行业属性, 判断公司的风险等级。
+
+        Args:
+            metrics (dict): 包含财务指标的字典。
+            stock_info (dict): 包含行业等信息的字典。
+
+        Returns:
+            str: 风险等级 ('较低', '中等', '较高')。
+        """
         # 资产负债率
         debt_ratio_str = metrics.get("debt_ratio", "N/A")
         if debt_ratio_str != "N/A":
@@ -929,7 +1045,15 @@ class OptimizedChinaDataProvider:
         return "中等"
 
     def _get_estimated_financial_metrics(self, symbol: str, price_value: float) -> dict:
-        """获取估算财务指标（原有的分类方法）"""
+        """在无法获取真实财务数据时, 根据股票代码特征生成一套预估的财务指标。
+
+        Args:
+            symbol (str): 股票代码。
+            price_value (float): 当前股价。
+
+        Returns:
+            dict: 包含预估财务指标和评分的字典。
+        """
         # 根据股票代码和价格估算指标
         if symbol.startswith(('000001', '600036')):  # 银行股
             return {
@@ -990,7 +1114,14 @@ class OptimizedChinaDataProvider:
             }
 
     def _analyze_valuation(self, financial_estimates: dict) -> str:
-        """分析估值水平"""
+        """基于估值评分, 生成关于公司估值水平的文本分析。
+
+        Args:
+            financial_estimates (dict): 包含估值评分的字典。
+
+        Returns:
+            str: 估值水平的文本描述。
+        """
         valuation_score = financial_estimates['valuation_score']
 
         if valuation_score >= 8:
@@ -1001,7 +1132,15 @@ class OptimizedChinaDataProvider:
             return "当前估值偏高，投资需谨慎。建议等待更好的买入时机。"
 
     def _analyze_growth_potential(self, symbol: str, industry_info: dict) -> str:
-        """分析成长潜力"""
+        """基于股票代码和行业信息, 生成关于公司成长潜力的文本分析。
+
+        Args:
+            symbol (str): 股票代码。
+            industry_info (dict): 包含行业信息的字典。
+
+        Returns:
+            str: 成长潜力的文本描述。
+        """
         if symbol.startswith(('000001', '600036')):
             return "银行业整体增长稳定，受益于经济发展和金融深化。数字化转型和财富管理业务是主要增长点。"
         elif symbol.startswith('300'):
@@ -1010,7 +1149,16 @@ class OptimizedChinaDataProvider:
             return "成长潜力需要结合具体行业和公司基本面分析。建议关注行业发展趋势和公司竞争优势。"
 
     def _analyze_risks(self, symbol: str, financial_estimates: dict, industry_info: dict) -> str:
-        """分析投资风险"""
+        """基于风险等级、股票代码和行业信息, 生成关于投资风险的文本分析。
+
+        Args:
+            symbol (str): 股票代码。
+            financial_estimates (dict): 包含风险等级的字典。
+            industry_info (dict): 包含行业信息的字典。
+
+        Returns:
+            str: 主要投资风险的文本描述。
+        """
         risk_level = financial_estimates['risk_level']
 
         risk_analysis = f"**风险等级**: {risk_level}\n\n"
@@ -1037,7 +1185,15 @@ class OptimizedChinaDataProvider:
         return risk_analysis
 
     def _generate_investment_advice(self, financial_estimates: dict, industry_info: dict) -> str:
-        """生成投资建议"""
+        """基于综合评分, 生成具体的投资建议文本。
+
+        Args:
+            financial_estimates (dict): 包含各项评分的字典。
+            industry_info (dict): 包含行业信息的字典。
+
+        Returns:
+            str: 投资建议的文本描述。
+        """
         fundamental_score = financial_estimates['fundamental_score']
         valuation_score = financial_estimates['valuation_score']
         growth_score = financial_estimates['growth_score']
@@ -1061,7 +1217,16 @@ class OptimizedChinaDataProvider:
 - 风险承受能力较低的投资者应避免"""
     
     def _try_get_old_cache(self, symbol: str, start_date: str, end_date: str) -> Optional[str]:
-        """尝试获取过期的缓存数据作为备用"""
+        """当实时数据获取失败时, 尝试从缓存中查找任何可用的 (即使已过期) 数据。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str): 数据的开始日期。
+            end_date (str): 数据的结束日期。
+
+        Returns:
+            Optional[str]: 如果找到旧缓存, 返回其内容并附带警告; 否则返回 None。
+        """
         try:
             # 查找任何相关的缓存，不考虑TTL
             for metadata_file in self.cache.metadata_dir.glob(f"*_meta.json"):
@@ -1087,7 +1252,17 @@ class OptimizedChinaDataProvider:
         return None
     
     def _generate_fallback_data(self, symbol: str, start_date: str, end_date: str, error_msg: str) -> str:
-        """生成备用数据"""
+        """在所有数据获取尝试均失败后, 生成一份包含错误信息的模拟数据报告。
+
+        Args:
+            symbol (str): 股票代码。
+            start_date (str): 开始日期。
+            end_date (str): 结束日期。
+            error_msg (str): 具体的错误信息。
+
+        Returns:
+            str: 格式化的备用数据报告。
+        """
         return f"""# {symbol} A股数据获取失败
 
 ## ❌ 错误信息
@@ -1108,7 +1283,15 @@ class OptimizedChinaDataProvider:
 """
     
     def _generate_fallback_fundamentals(self, symbol: str, error_msg: str) -> str:
-        """生成备用基本面数据"""
+        """在基本面报告生成失败时, 创建一份包含错误信息的备用报告。
+
+        Args:
+            symbol (str): 股票代码。
+            error_msg (str): 具体的错误信息。
+
+        Returns:
+            str: 格式化的备用基本面报告。
+        """
         return f"""# {symbol} A股基本面分析失败
 
 ## ❌ 错误信息
@@ -1127,26 +1310,30 @@ class OptimizedChinaDataProvider:
 _china_data_provider = None
 
 def get_optimized_china_data_provider() -> OptimizedChinaDataProvider:
-    """获取全局A股数据提供器实例"""
+    """获取 `OptimizedChinaDataProvider` 的全局单例。
+
+    Returns:
+        OptimizedChinaDataProvider: 全局A股数据提供器实例。
+    """
     global _china_data_provider
     if _china_data_provider is None:
         _china_data_provider = OptimizedChinaDataProvider()
     return _china_data_provider
 
 
-def get_china_stock_data_cached(symbol: str, start_date: str, end_date: str, 
+def get_china_stock_data_cached(symbol: str, start_date: str, end_date: str,
                                force_refresh: bool = False) -> str:
     """
-    获取A股数据的便捷函数
-    
+    获取A股行情数据的便捷函数。
+
     Args:
-        symbol: 股票代码（6位数字）
-        start_date: 开始日期 (YYYY-MM-DD)
-        end_date: 结束日期 (YYYY-MM-DD)
-        force_refresh: 是否强制刷新缓存
-    
+        symbol (str): 股票代码 (通常是6位数字)。
+        start_date (str): 开始日期, 格式为 'YYYY-MM-DD'。
+        end_date (str): 结束日期, 格式为 'YYYY-MM-DD'。
+        force_refresh (bool, optional): 是否强制刷新缓存。
+
     Returns:
-        格式化的股票数据字符串
+        str: 格式化的股票数据字符串。
     """
     provider = get_optimized_china_data_provider()
     return provider.get_stock_data(symbol, start_date, end_date, force_refresh)
@@ -1154,14 +1341,14 @@ def get_china_stock_data_cached(symbol: str, start_date: str, end_date: str,
 
 def get_china_fundamentals_cached(symbol: str, force_refresh: bool = False) -> str:
     """
-    获取A股基本面数据的便捷函数
-    
+    获取A股基本面分析报告的便捷函数。
+
     Args:
-        symbol: 股票代码（6位数字）
-        force_refresh: 是否强制刷新缓存
-    
+        symbol (str): 股票代码 (通常是6位数字)。
+        force_refresh (bool, optional): 是否强制刷新缓存。
+
     Returns:
-        格式化的基本面数据字符串
+        str: 格式化的基本面分析报告。
     """
     provider = get_optimized_china_data_provider()
     return provider.get_fundamentals_data(symbol, force_refresh)
